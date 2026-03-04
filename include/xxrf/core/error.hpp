@@ -20,6 +20,8 @@ struct Error final {
 template <typename T>
 using Result = std::expected<T, Error>;
 
+using Status = std::expected<void, Error>;
+
 inline Error make_error(int code, std::string_view where) {
     const char* what = hackrf_error_name(static_cast<hackrf_error>(code));
     std::string msg = std::format("{}: {} ({})\n", where, (what ? what : "(unknown)"), code);
@@ -27,6 +29,6 @@ inline Error make_error(int code, std::string_view where) {
     return Error{.code = code, .message = std::move(msg)};
 }
 
-inline Result<void> ok() { return {}; }
+inline Status ok() { return {}; }
 
 } // namespace xxrf::core
