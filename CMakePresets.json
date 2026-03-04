@@ -1,0 +1,86 @@
+{
+  "version": 4,
+  "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
+
+  "configurePresets": [
+    {
+      "name": "gcc-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CXX_HACKRF_USE_BUNDLED_LIBHACKRF": "ON",
+        "CXX_HACKRF_BUILD_EXAMPLES": "ON",
+        "CXX_HACKRF_BUILD_APPS": "ON",
+        "CXX_HACKRF_BUILD_TESTS": "ON",
+        "CXX_HACKRF_ENABLE_WERROR": "OFF",
+        "CXX_HACKRF_ENABLE_SANITIZERS": "OFF",
+        "CXX_HACKRF_ENABLE_LTO": "OFF"
+      }
+    },
+
+    {
+      "name": "gcc-debug",
+      "inherits": "gcc-base",
+      "binaryDir": "${sourceDir}/build/gcc-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++"
+      }
+    },
+    {
+      "name": "gcc-release",
+      "inherits": "gcc-base",
+      "binaryDir": "${sourceDir}/build/gcc-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++",
+        "CXX_HACKRF_ENABLE_LTO": "ON"
+      }
+    },
+    {
+      "name": "gcc-relwithdebinfo",
+      "inherits": "gcc-base",
+      "binaryDir": "${sourceDir}/build/gcc-relwithdebinfo",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++"
+      }
+    },
+    {
+      "name": "gcc-asan",
+      "inherits": "gcc-base",
+      "binaryDir": "${sourceDir}/build/gcc-asan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++",
+        "CXX_HACKRF_ENABLE_SANITIZERS": "ON"
+      }
+    }
+  ],
+
+  "buildPresets": [
+    { "name": "gcc-debug", "configurePreset": "gcc-debug", "jobs": 0 },
+    { "name": "gcc-release", "configurePreset": "gcc-release", "jobs": 0 },
+    { "name": "gcc-relwithdebinfo", "configurePreset": "gcc-relwithdebinfo", "jobs": 0 },
+    { "name": "gcc-asan", "configurePreset": "gcc-asan", "jobs": 0 }
+  ],
+
+  "testPresets": [
+    {
+      "name": "gcc-debug",
+      "configurePreset": "gcc-debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "gcc-asan",
+      "configurePreset": "gcc-asan",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}
