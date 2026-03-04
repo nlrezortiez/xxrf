@@ -37,10 +37,12 @@ Device& Device::operator=(Device&& other) noexcept {
 
 Device::~Device() { close(); }
 
-Result<void> Device::close() {
+Status Device::close() {
     if (dev_ == nullptr) {
         return ok();
     }
+
+    std::scoped_lock lc(api_mtx_);
 
     const int streaming = hackrf_is_streaming(dev_);
     if (streaming == HACKRF_TRUE) {
@@ -50,45 +52,64 @@ Result<void> Device::close() {
 
     const int rc = hackrf_close(dev_);
     dev_ = nullptr;
-    return check(rc, "[~Devie() -> Device::close] hackrf_close");
+    if (rc != HACKRF_SUCCESS) {
+        return std::unexpected(make_error(rc, "[Device::close] hackrf_close"));
+    }
+    return ok();
 }
 
-Result<void> Device::set_sample_rate(const double hz) {
+Status Device::stop_rx() noexcept {
+    if (dev_ == nullptr) {
+        return xxrf::core::ok();
+    }
+
+    std::scoped_lock lk(api_mtx_);
+    const int streaming = hackrf_is_streaming(dev_);
+    if (streaming == HACKRF_TRUE) {
+        const int rc = hackrf_stop_rx(dev_);
+        if (rc != HACKRF_SUCCESS) {
+            return std::unexpected(make_error(rc, "[Device::stop_rx] hackrf_stop_rx"));
+        }
+    }
+    return ok();
+}
+
+Status Device::set_sample_rate(const double hz) {
     if (dev_ == nullptr) {
         return std::unexpected(Error{.code = -1, .message = "[Device::set_sample_rate] null handle"});
     }
     return check(hackrf_set_sample_rate(dev_, hz), "[Device::set_sample_rate] hackrf_set_sample_rate");
 }
 
-Result<void> Device::set_center_freq(const std::uint64_t hz) {
+Status Device::set_center_freq(const std::uint64_t hz) {
     if (dev_ == nullptr) {
         return std::unexpected(Error{.code = -1, .message = "[Device::set_center_freq] null handle"});
     }
     return check(hackrf_set_freq(dev_, hz), "[Device::set_center_freq] hackrf_set_freq");
 }
 
-Result<void> Device::set_lna_gain(std::uint32_t db) {
+Status Device::set_lna_gain(std::uint32_t db) {
     if (dev_ == nullptr) {
         return std::unexpected(Error{.code = -1, .message = "[Device::set_lna_gain] null handle"});
     }
     return check(hackrf_set_lna_gain(dev_, db), "[Device::set_lna_gain] hackrf_set_lna_gain");
 }
 
-Result<void> Device::set_vga_gain(std::uint32_t db) {
+Status Device::set_vga_gain(std::uint32_t db) {
     if (dev_ == nullptr) {
         return std::unexpected(Error{.code = -1, .message = "[Device::set_vga_gain] null handle"});
     }
     return check(hackrf_set_vga_gain(dev_, db), "[Device::set_vga_gain] hackrf_set_vga_gain");
 }
 
-Result<void> Device::set_amp_enable(bool on) {
+Status Device::set_amp_enable(bool on) {
     if (dev_ == nullptr) {
         return std::unexpected(Error{.code = -1, .message = "[Device::set_amp_enable] null handle"});
     }
     return check(hackrf_set_amp_enable(dev_, on ? 1U : 0U), "[Device::set_amp_enable] hackrf_set_amp_enable");
 }
 
-Result<void> Device::set_bias_tee_enable(bool on) {
+Status Device::set_bias_tee_enable(bool on) {
     if (dev_ == nullptr) {
         return std::unexpected(Error{.code = -1, .message = "[Device::set_bias_tee_enable] null handle"});
     }
@@ -96,7 +117,7 @@ Result<void> Device::set_bias_tee_enable(bool on) {
                  "[Device::set_bias_tee_enable] hackrf_set_antenna_enable");
 }
 
-Result<void> Device::set_hw_sync_mode(bool on) {
+Status Device::set_hw_sync_mode(bool on) {
     if (dev_ == nullptr) {
         return std::unexpected(Error{.code = -1, .message = "[Device::set_hw_sync_mode] null handle"});
     }
