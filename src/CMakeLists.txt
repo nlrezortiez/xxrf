@@ -116,7 +116,6 @@ endif()
 
 # ------------------------------------------------------------------------------
 # Sync layer (dual-device start, trigger orchestration, alignment helpers)
-# Recommended sources location:
 #   src/sync/*.cpp
 # ------------------------------------------------------------------------------
 file(GLOB_RECURSE XXRF_SYNC_SOURCES CONFIGURE_DEPENDS
@@ -142,6 +141,33 @@ else()
   target_link_libraries(xxrf_sync PUBLIC xxrf::stream)
 endif()
 
+# --------------------------------------------------------------------------
+# AoA layer
+# src/aoa/*.cpp
+# --------------------------------------------------------------------------
+file(GLOB_RECURSE XXRF_AOA_SOURCES CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_LIST_DIR}/aoa/*.cpp"
+  "${CMAKE_CURRENT_LIST_DIR}/aoa/*.cc"
+  "${CMAKE_CURRENT_LIST_DIR}/aoa/*.cxx"
+)
+
+if (XXRF_AOA_SOURCES)
+  add_library(xxrf_aoa STATIC)
+  target_sources(xxrf_aoa PRIVATE ${XXRF_AOA_SOURCES})
+else()
+  add_library(xxrf_aoa INTERFACE)
+endif()
+
+add_library(xxrf::aoa ALIAS xxrf_aoa)
+xxrf_apply_common(xxrf_aoa)
+
+get_target_property(_ao xxrf_aoa TYPE)
+if (NOT _ao STREQUAL "INTERFACE_LIBRARY")
+  target_link_libraries(xxrf_aoa PUBLIC xxrf::sync)
+else()
+  target_link_libraries(xxrf_aoa INTERFACE xxrf::sync)
+endif()
+
 # ------------------------------------------------------------------------------
 # Umbrella target: link one thing from apps/examples/tests
 # ------------------------------------------------------------------------------
@@ -152,6 +178,8 @@ target_link_libraries(xxrf INTERFACE
   xxrf::core
   xxrf::stream
   xxrf::sync
+  xxrf::aoa
 )
 
 xxrf_apply_common(xxrf)
+

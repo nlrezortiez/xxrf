@@ -17,6 +17,6 @@ foreach(src ${EXAMPLE_SOURCES})
   target_link_libraries(${tgt} PRIVATE xxrf::xxrf)
 
   if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(${tgt} PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(${tgt} PRIVATE -Wall -Wextra)
   endif()
 endforeach()
