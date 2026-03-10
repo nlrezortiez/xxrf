@@ -31,7 +31,7 @@ public:
     Status set_amp_enable(bool on);
     Status set_bias_tee_enable(bool on);
     Status set_hw_sync_mode(bool on);
-    Status set_clkout_enable(bool on);
+    Status set_clkout_enable(bool on) noexcept;
     Result<uint8_t> clkin_detected();
 
     hackrf_device* native_handle() noexcept { return dev_; }

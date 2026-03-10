@@ -125,6 +125,19 @@ Status Device::set_hw_sync_mode(bool on) {
     return check(hackrf_set_hw_sync_mode(dev_, on ? 1U : 0U), "[Device::set_hw_sync_enable] hackrf_set_hw_sync_mode");
 }
 
+Status Device::set_clkout_enable(bool on) noexcept {
+    if (dev_ == nullptr) {
+        return std::unexpected(Error{.code = -1, .message = "[Device::set_clkout_enable] null handle"});
+    }
+
+    const std::uint8_t v = on ? 1U : 0U;
+    const int rc = hackrf_set_clkout_enable(dev_, v);
+    if (rc != HACKRF_SUCCESS) {
+        return std::unexpected(make_error(rc, "[Device::set_clkout_enable] hackrf_set_clkout_enable"));
+    }
+    return ok();
+}
+
 Result<std::uint8_t> Device::clkin_detected() {
     if (dev_ == nullptr) {
         return std::unexpected(Error{.code = -1, .message = "[Device::clkin_detected] null handle"});
