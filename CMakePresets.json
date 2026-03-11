@@ -10,13 +10,13 @@
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "CXX_HACKRF_USE_BUNDLED_LIBHACKRF": "ON",
-        "CXX_HACKRF_BUILD_EXAMPLES": "ON",
-        "CXX_HACKRF_BUILD_APPS": "ON",
-        "CXX_HACKRF_BUILD_TESTS": "ON",
-        "CXX_HACKRF_ENABLE_WERROR": "OFF",
-        "CXX_HACKRF_ENABLE_SANITIZERS": "OFF",
-        "CXX_HACKRF_ENABLE_LTO": "OFF"
+        "XXRF_USE_BUNDLED_LIBHACKRF": "ON",
+        "XXRF_BUILD_EXAMPLES": "ON",
+        "XXRF_BUILD_APPS": "ON",
+        "XXRF_BUILD_TESTS": "ON",
+        "XXRF_ENABLE_WERROR": "OFF",
+        "XXRF_ENABLE_SANITIZERS": "OFF",
+        "XXRF_ENABLE_LTO": "OFF"
       }
     },
 
@@ -38,7 +38,7 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_C_COMPILER": "gcc",
         "CMAKE_CXX_COMPILER": "g++",
-        "CXX_HACKRF_ENABLE_LTO": "ON"
+        "XXRF_ENABLE_LTO": "ON"
       }
     },
     {
@@ -59,7 +59,7 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_C_COMPILER": "gcc",
         "CMAKE_CXX_COMPILER": "g++",
-        "CXX_HACKRF_ENABLE_SANITIZERS": "ON"
+        "XXRF_ENABLE_SANITIZERS": "ON"
       }
     }
   ],
