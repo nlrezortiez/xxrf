@@ -10,7 +10,7 @@ namespace xxrf::aoa {
 
 enum class Method : std::uint8_t {
     PhaseInterferometry = 0,
-    // TODO: TdoaGccPhat, CrossSpectrum, Music...
+    
 };
 
 struct ArrayGeometry final {
@@ -61,9 +61,9 @@ struct Config final {
     bool clamp_sin = false;
     bool require_contiguous = true;
     bool apply_calibration = true;
+    bool emit_below_quality = false;
 };
 
-// non-owning function wrapper (no allocations), similar to llvm::function_ref.
 template <class Signature>
 class FunctionRef;
 
@@ -97,4 +97,4 @@ struct Stats final {
     std::uint64_t below_quality = 0;
 };
 
-} // namespace xxrf::aoa
+} 

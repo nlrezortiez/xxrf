@@ -6,6 +6,8 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <atomic>
+#include <format>
 #include <memory>
 #include <new>
 #include <vector>
@@ -13,7 +15,7 @@
 namespace xxrf::aoa {
 
 static inline float i8_to_f(std::int8_t v) noexcept {
-    // Map [-128..127] -> ~[-1..1)
+    
     return static_cast<float>(v) * (1.0F / 128.0F);
 }
 
@@ -21,7 +23,7 @@ struct Processor::Impl final {
     Config cfg{};
     Calibration cal{};
 
-    // Rolling window ring buffers (post-stride samples).
+    
     std::vector<std::complex<double>> cross_ring;
     std::vector<double> p0_ring;
     std::vector<double> p1_ring;
@@ -31,12 +33,17 @@ struct Processor::Impl final {
     double p1_sum = 0.0;
 
     std::size_t ring_pos = 0;
-    std::size_t filled = 0;     // <= window_samples
-    std::size_t since_emit = 0; // counts post-stride samples since last emission
+    std::size_t filled = 0;     
+    std::size_t since_emit = 0; 
 
     std::uint64_t expected_next_first = std::numeric_limits<std::uint64_t>::max();
 
-    Stats st{};
+    std::atomic<std::uint64_t> frames_in{0};
+    std::atomic<std::uint64_t> samples_used{0};
+    std::atomic<std::uint64_t> estimates_emitted{0};
+    std::atomic<std::uint64_t> discontinuities{0};
+    std::atomic<std::uint64_t> invalid_geometry{0};
+    std::atomic<std::uint64_t> below_quality{0};
 
     void clear_accumulators() noexcept {
         cross_sum = {0.0, 0.0};
@@ -52,8 +59,8 @@ struct Processor::Impl final {
     }
 
     void add_sample(std::complex<double> cross, double p0, double p1, std::uint64_t sample_index,
-                    FunctionRef<void(const Estimate&)> emit) noexcept {
-        // Update rolling sums.
+                    FunctionRef<void(const Estimate&)> emit) {
+        
         if (filled < cfg.win.window_samples) {
             cross_ring[ring_pos] = cross;
             p0_ring[ring_pos] = p0;
@@ -66,7 +73,7 @@ struct Processor::Impl final {
             ++filled;
             ring_pos = (ring_pos + 1) % cfg.win.window_samples;
         } else {
-            // Remove old, add new at ring_pos.
+            
             cross_sum -= cross_ring[ring_pos];
             p0_sum -= p0_ring[ring_pos];
             p1_sum -= p1_ring[ring_pos];
@@ -83,7 +90,7 @@ struct Processor::Impl final {
         }
 
         if (filled < cfg.win.window_samples) {
-            return; // not enough data yet
+            return; 
         }
 
         ++since_emit;
@@ -92,11 +99,11 @@ struct Processor::Impl final {
         }
         since_emit = 0;
 
-        // Emit estimate.
+        
         Estimate est{};
         est.raw_phase_rad = std::atan2(cross_sum.imag(), cross_sum.real());
 
-        // Coherence proxy.
+        
         double coh = 0.0;
         if (p0_sum > 0.0 && p1_sum > 0.0) {
             const double num = std::abs(cross_sum);
@@ -112,9 +119,9 @@ struct Processor::Impl final {
 
         auto ang = phase_to_angle(est.raw_phase_rad, cfg.geom, cfg.center_freq_hz, cfg.clamp_sin);
         if (!ang.ok) {
-            ++st.invalid_geometry;
+            invalid_geometry.fetch_add(1, std::memory_order_relaxed);
             est.quality.ok = false;
-            // Still emit? For now: do not emit invalid geometry.
+            
             return;
         }
 
@@ -124,24 +131,26 @@ struct Processor::Impl final {
         const bool ok = (coh >= cfg.min_coherence);
         est.quality.ok = ok;
 
-        // Sample index: center of window in ORIGINAL sample domain.
-        // Window is in post-stride samples; map back by multiplying by stride.
+        
+        
         const std::uint64_t half_span =
             static_cast<std::uint64_t>((cfg.win.window_samples / 2) * cfg.win.sample_stride);
         est.sample_index = (sample_index >= half_span) ? (sample_index - half_span) : sample_index;
 
         if (!ok) {
-            ++st.below_quality;
-            return; // do not emit low-quality results
+            below_quality.fetch_add(1, std::memory_order_relaxed);
+            if (!cfg.emit_below_quality) {
+                return;
+            }
         }
 
-        ++st.estimates_emitted;
         emit(est);
+        estimates_emitted.fetch_add(1, std::memory_order_relaxed);
     }
 };
 
-xxrf::core::Result<Processor> Processor::create(Config cfg, Calibration cal) noexcept {
-    // Validate config strictly; errors returned here, not at runtime.
+xxrf::core::Result<Processor> Processor::create(Config cfg, Calibration cal) {
+    
     if (cfg.method != Method::PhaseInterferometry) {
         return std::unexpected(
             xxrf::core::Error{.code = -1, .message = "AoA Processor: only PhaseInterferometry is implemented"});
@@ -154,6 +163,15 @@ xxrf::core::Result<Processor> Processor::create(Config cfg, Calibration cal) noe
     }
     if (!(cfg.geom.baseline_m > 0.0)) {
         return std::unexpected(xxrf::core::Error{.code = -1, .message = "AoA Processor: geom.baseline_m must be > 0"});
+    }
+    const double max_baseline_m = max_unambiguous_baseline_m(cfg.center_freq_hz);
+    if (!(cfg.geom.baseline_m <= max_baseline_m)) {
+        return std::unexpected(xxrf::core::Error{
+            .code = -1,
+            .message =
+                std::format("AoA Processor: geom.baseline_m must be <= lambda/2 ({:.6f} m at {} Hz)",
+                            max_baseline_m, cfg.center_freq_hz),
+        });
     }
     if (cfg.win.window_samples == 0 || cfg.win.hop_samples == 0) {
         return std::unexpected(
@@ -232,17 +250,25 @@ Stats Processor::stats() const noexcept {
     if (impl_ == nullptr) {
         return {};
     }
-    return impl_->st;
+
+    Stats st;
+    st.frames_in = impl_->frames_in.load(std::memory_order_relaxed);
+    st.samples_used = impl_->samples_used.load(std::memory_order_relaxed);
+    st.estimates_emitted = impl_->estimates_emitted.load(std::memory_order_relaxed);
+    st.discontinuities = impl_->discontinuities.load(std::memory_order_relaxed);
+    st.invalid_geometry = impl_->invalid_geometry.load(std::memory_order_relaxed);
+    st.below_quality = impl_->below_quality.load(std::memory_order_relaxed);
+    return st;
 }
 
-void Processor::push(const InputFrameView& frame, FunctionRef<void(const Estimate&)> emit) noexcept {
+void Processor::push(const InputFrameView& frame, FunctionRef<void(const Estimate&)> emit) {
     if (impl_ == nullptr) {
         return;
     }
 
-    ++impl_->st.frames_in;
+    impl_->frames_in.fetch_add(1, std::memory_order_relaxed);
 
-    // Basic validation: I/Q interleaved, even number of bytes.
+    
     const std::size_t n0 = (frame.iq0_i8q8.size() / 2);
     const std::size_t n1 = (frame.iq1_i8q8.size() / 2);
     const std::size_t n = std::min(n0, n1);
@@ -251,15 +277,15 @@ void Processor::push(const InputFrameView& frame, FunctionRef<void(const Estimat
         return;
     }
 
-    // Contiguity check (frame-to-frame).
+    
     if (impl_->cfg.require_contiguous) {
         if (impl_->expected_next_first != std::numeric_limits<std::uint64_t>::max()) {
             if (frame.first_sample_index != impl_->expected_next_first) {
-                ++impl_->st.discontinuities;
+                impl_->discontinuities.fetch_add(1, std::memory_order_relaxed);
                 impl_->clear_accumulators();
             }
         }
-        // After potential reset, establish new expected boundary based on THIS frame length.
+        
         impl_->expected_next_first = frame.first_sample_index + static_cast<std::uint64_t>(n);
     } else {
         impl_->expected_next_first = std::numeric_limits<std::uint64_t>::max();
@@ -267,8 +293,8 @@ void Processor::push(const InputFrameView& frame, FunctionRef<void(const Estimat
 
     const std::size_t stride = impl_->cfg.win.sample_stride;
 
-    // Process samples.
-    // Channel-1 optional calibration (fixed complex gain).
+    
+    
     const std::complex<float> g = impl_->cfg.apply_calibration ? impl_->cal.ch1_gain : std::complex<float>{1.0F, 0.0F};
 
     for (std::size_t i = 0; i < n; i += stride) {
@@ -294,9 +320,9 @@ void Processor::push(const InputFrameView& frame, FunctionRef<void(const Estimat
 
         const std::uint64_t sample_index = frame.first_sample_index + static_cast<std::uint64_t>(i);
 
-        ++impl_->st.samples_used;
+        impl_->samples_used.fetch_add(1, std::memory_order_relaxed);
         impl_->add_sample(cross, p0, p1, sample_index, emit);
     }
 }
 
-} // namespace xxrf::aoa
+} 

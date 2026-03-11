@@ -16,7 +16,7 @@ namespace xxrf::sync {
 static inline void atomic_max(std::atomic<std::uint64_t>& dst, std::uint64_t v) noexcept {
     std::uint64_t cur = dst.load(std::memory_order_relaxed);
     while (v > cur && !dst.compare_exchange_weak(cur, v, std::memory_order_relaxed)) {
-        // cur updated by CAS
+        
     }
 }
 
@@ -26,28 +26,28 @@ static inline xxrf::core::Error make_local_error(std::string msg) {
 
 struct BlockCopy final {
     std::uint64_t first_sample = 0;
-    std::vector<std::int8_t> iq; // interleaved I/Q
+    std::vector<std::int8_t> iq; 
 };
 
 struct DualRx::Impl final {
-    // Keep libhackrf initialized while DualRx exists (ref-counted).
+    
     xxrf::core::Context ctx_guard;
 
     DualRxOptions opt{};
 
-    // Own devices to avoid lifetime hazards (streams refer to these).
-    xxrf::core::Device dev_out; // TriggerOut
-    xxrf::core::Device dev_in;  // TriggerInWait
+    
+    xxrf::core::Device dev_out; 
+    xxrf::core::Device dev_in;  
 
-    // Two independent RxStreams. Their handlers push copies into staging queues.
+    
     std::optional<xxrf::stream::RxStream> rx_out;
     std::optional<xxrf::stream::RxStream> rx_in;
 
-    // Coordinator thread: pairs staging blocks and calls user handler.
+    
     std::thread coordinator;
     DualRxHandler handler;
 
-    // Staging queues: protected by one mutex for consistent pairing decisions.
+    
     std::mutex m;
     std::condition_variable cv;
 
@@ -55,10 +55,11 @@ struct DualRx::Impl final {
     std::deque<BlockCopy> q_in;
 
     std::atomic<bool> stop_requested{false};
+    std::atomic<bool> drop_queued_on_stop{true};
     bool out_done = false;
     bool in_done = false;
 
-    // stats
+    
     std::atomic<std::uint64_t> pairs_emitted{0};
     std::atomic<std::uint64_t> drops_pairing_out{0};
     std::atomic<std::uint64_t> drops_pairing_in{0};
@@ -67,7 +68,7 @@ struct DualRx::Impl final {
     std::atomic<std::uint64_t> staging_max_depth_out{0};
     std::atomic<std::uint64_t> staging_max_depth_in{0};
 
-    // fatal error reported from any worker thread (handler throw/bad_alloc, etc.)
+    
     mutable std::mutex fatal_m;
     std::optional<xxrf::core::Error> fatal;
 
@@ -88,8 +89,9 @@ struct DualRx::Impl final {
         return tmp;
     }
 
-    void request_stop() noexcept {
+    void request_stop(bool drop_queued) noexcept {
         stop_requested.store(true, std::memory_order_relaxed);
+        drop_queued_on_stop.store(drop_queued, std::memory_order_relaxed);
 
         if (rx_out) {
             rx_out->request_stop();
@@ -100,19 +102,18 @@ struct DualRx::Impl final {
 
         {
             std::lock_guard lk(m);
-            out_done = true;
-            in_done = true;
-
-            q_out.clear();
-            q_in.clear();
+            if (drop_queued) {
+                q_out.clear();
+                q_in.clear();
+            }
         }
         cv.notify_all();
     }
 
     void push_block(bool is_out, const xxrf::stream::RxBlock& blk) noexcept {
-        // This runs in RxStream consumer thread, not in libusb callback.
-        // Must be exception-safe: any throw would terminate the thread.
-        if (stop_requested.load(std::memory_order_relaxed)) {
+        
+        
+        if (stop_requested.load(std::memory_order_relaxed) && drop_queued_on_stop.load(std::memory_order_relaxed)) {
             return;
         }
 
@@ -139,7 +140,7 @@ struct DualRx::Impl final {
             const std::size_t cap = opt.staging_queue_blocks;
 
             if (q.size() >= cap) {
-                // Real-time policy: drop oldest to keep latency bounded.
+                
                 q.pop_front();
                 if (is_out) {
                     drops_pairing_out.fetch_add(1, std::memory_order_relaxed);
@@ -161,13 +162,13 @@ struct DualRx::Impl final {
             cv.notify_one();
         } catch (const std::bad_alloc&) {
             set_fatal(this, make_local_error("DualRx: OOM while copying RX block into staging queue"));
-            request_stop();
+            request_stop(true);
         } catch (const std::exception& ex) {
             set_fatal(this, make_local_error(std::string("DualRx: exception in staging push: ") + ex.what()));
-            request_stop();
+            request_stop(true);
         } catch (...) {
             set_fatal(this, make_local_error("DualRx: unknown exception in staging push"));
-            request_stop();
+            request_stop(true);
         }
     }
 
@@ -176,8 +177,8 @@ struct DualRx::Impl final {
     }
 
     void coordinator_loop() noexcept {
-        // Ensures handler is called from a single thread.
-        // Never call handler while holding mutex m (avoid blocking producers).
+        
+        
         for (;;) {
             BlockCopy a;
             BlockCopy b;
@@ -197,14 +198,23 @@ struct DualRx::Impl final {
                     return !q_out.empty() && !q_in.empty();
                 });
 
-                // Exit condition: stop requested, both streams stopped, queues drained.
+                
                 if (stop_requested.load(std::memory_order_relaxed) && out_done && in_done && q_out.empty() &&
                     q_in.empty()) {
                     break;
                 }
 
+                if (stop_requested.load(std::memory_order_relaxed) && out_done && in_done &&
+                    (q_out.empty() || q_in.empty())) {
+                    drops_pairing_out.fetch_add(static_cast<std::uint64_t>(q_out.size()), std::memory_order_relaxed);
+                    drops_pairing_in.fetch_add(static_cast<std::uint64_t>(q_in.size()), std::memory_order_relaxed);
+                    q_out.clear();
+                    q_in.clear();
+                    break;
+                }
+
                 if (q_out.empty() || q_in.empty()) {
-                    // Could be stop wakeup or one side not ready yet.
+                    
                     continue;
                 }
 
@@ -214,12 +224,12 @@ struct DualRx::Impl final {
                     b = std::move(q_in.front());
                     q_in.pop_front();
 
-                    // common index for info only: choose max start
+                    
                     first_common = std::max(a.first_sample, b.first_sample);
                     skew_abs = abs_diff_u64(a.first_sample, b.first_sample);
                     atomic_max(max_abs_skew_samples, skew_abs);
 
-                    // Align by trimming leading skew (best effort), even in arrival-order mode.
+                    
                     if (a.first_sample < first_common) {
                         skip_a_bytes = static_cast<std::size_t>((first_common - a.first_sample) * 2);
                     }
@@ -232,10 +242,10 @@ struct DualRx::Impl final {
                     use_bytes = std::min(a_av, b_av);
                     use_bytes &= ~std::size_t{1};
 
-                } else { // PairingMode::BySampleIndex
+                } else { 
                     for (;;) {
                         if (q_out.empty() || q_in.empty()) {
-                            break; // need both to decide
+                            break; 
                         }
 
                         const auto& ao = q_out.front();
@@ -248,7 +258,7 @@ struct DualRx::Impl final {
                         atomic_max(max_abs_skew_samples, skew);
 
                         if (skew <= opt.max_skew_samples) {
-                            // Pair these two, and align by trimming the earlier one (if skew>0).
+                            
                             a = std::move(q_out.front());
                             q_out.pop_front();
                             b = std::move(q_in.front());
@@ -271,7 +281,7 @@ struct DualRx::Impl final {
                             break;
                         }
 
-                        // If skew too large: drop the earlier block (move forward) to catch up.
+                        
                         if (out_first < in_first) {
                             q_out.pop_front();
                             drops_pairing_out.fetch_add(1, std::memory_order_relaxed);
@@ -280,22 +290,22 @@ struct DualRx::Impl final {
                             drops_pairing_in.fetch_add(1, std::memory_order_relaxed);
                         }
 
-                        // Continue loop; we might be able to form a pair now.
+                        
                     }
-                } // BySampleIndex
-            } // unlock m
+                } 
+            } 
 
             if (stop_requested.load(std::memory_order_relaxed) && (a.iq.empty() || b.iq.empty())) {
-                // If we were woken to stop, and no valid pair extracted, continue to drain/exit.
+                
                 continue;
             }
 
             if (a.iq.empty() || b.iq.empty() || use_bytes == 0) {
-                // No usable aligned intersection.
+                
                 continue;
             }
 
-            // Call user handler outside locks, and ensure exception safety.
+            
             try {
                 DualRxBlockView view;
                 view.first_sample_index = first_common;
@@ -310,10 +320,10 @@ struct DualRx::Impl final {
                 pairs_emitted.fetch_add(1, std::memory_order_relaxed);
             } catch (const std::exception& ex) {
                 set_fatal(this, make_local_error(std::string("DualRx: handler threw: ") + ex.what()));
-                request_stop();
+                request_stop(true);
             } catch (...) {
                 set_fatal(this, make_local_error("DualRx: handler threw (unknown exception)"));
-                request_stop();
+                request_stop(true);
             }
         }
     }
@@ -352,7 +362,7 @@ static xxrf::core::Status apply_common_settings(xxrf::core::Device& d, const Dua
 static xxrf::core::Status configure_sync(xxrf::core::Device& out_dev, xxrf::core::Device& in_dev,
                                          const DualRxSyncOptions& so) noexcept {
     if (!so.enable_hardware_trigger) {
-        // Ensure hw_sync is off on both.
+        
         if (auto r = out_dev.set_hw_sync_mode(false); !r) {
             return std::unexpected(r.error());
         }
@@ -362,17 +372,17 @@ static xxrf::core::Status configure_sync(xxrf::core::Device& out_dev, xxrf::core
         return xxrf::core::ok();
     }
 
-    // Trigger-out device: hw_sync off (starts immediately, emits trigger out on start).
+    
     if (auto r = out_dev.set_hw_sync_mode(false); !r) {
         return std::unexpected(r.error());
     }
 
-    // Trigger-in device: hw_sync on (wait for external trigger).
+    
     if (auto r = in_dev.set_hw_sync_mode(true); !r) {
         return std::unexpected(r.error());
     }
 
-    // External clock handling: enable clkout on trigger-out, then validate clkin on trigger-in if requested.
+    
     if (so.enable_clkout_on_trigger_out) {
         if (auto r = out_dev.set_clkout_enable(true); !r) {
             return std::unexpected(r.error());
@@ -393,19 +403,15 @@ static xxrf::core::Status configure_sync(xxrf::core::Device& out_dev, xxrf::core
     return xxrf::core::ok();
 }
 
-xxrf::core::Result<DualRx> DualRx::start(xxrf::core::Context& /*ctx*/, const DualRxDeviceId& trigger_out,
-                                         const DualRxDeviceId& trigger_in, DualRxHandler handler,
-                                         DualRxOptions opt) noexcept {
-    // This overload exists for convenience; we still create an internal Context guard
-    // so DualRx remains safe even if caller destroys its Context earlier.
-    auto guard = xxrf::core::Context::create();
-    if (!guard) {
-        return std::unexpected(guard.error());
-    }
-
+xxrf::core::Result<DualRx> DualRx::start(const DualRxDeviceId& trigger_out, const DualRxDeviceId& trigger_in,
+                                         DualRxHandler handler, DualRxOptions opt) {
     if (trigger_out.role != TriggerRole::TriggerOut || trigger_in.role != TriggerRole::TriggerInWait) {
         return std::unexpected(
             make_local_error("DualRx::start: roles must be TriggerOut and TriggerInWait respectively"));
+    }
+
+    if (trigger_out.serial == trigger_in.serial) {
+        return std::unexpected(make_local_error("DualRx::start: trigger_out and trigger_in must be different devices"));
     }
 
     auto d_out = xxrf::core::Device::open_by_serial(trigger_out.serial);
@@ -418,18 +424,14 @@ xxrf::core::Result<DualRx> DualRx::start(xxrf::core::Context& /*ctx*/, const Dua
         return std::unexpected(d_in.error());
     }
 
-    // Delegate to the Device-owning overload.
-    // Move guard into Impl there.
-    // We temporarily ignore the ctx parameter; the guard ensures initialization lifetime.
-    // (Context is ref-counted, so this doesn't duplicate hackrf_init unless needed.)
-    // NOLINTNEXTLINE
+    
     return DualRx::start(std::move(*d_out), std::move(*d_in), std::move(handler), std::move(opt));
 }
 
 xxrf::core::Result<DualRx> DualRx::start(xxrf::core::Device trigger_out_dev, xxrf::core::Device trigger_in_dev,
-                                         DualRxHandler handler, DualRxOptions opt) noexcept {
+                                         DualRxHandler handler, DualRxOptions opt) {
 
-    // Construct Impl in steps to avoid any undefined constructs.
+    
     std::unique_ptr<Impl> impl;
     {
         auto guard = xxrf::core::Context::create();
@@ -441,7 +443,7 @@ xxrf::core::Result<DualRx> DualRx::start(xxrf::core::Device trigger_out_dev, xxr
                                       std::move(handler));
     }
 
-    // Apply common settings if requested.
+    
     if (impl->opt.settings.apply_common_settings) {
         if (auto r = apply_common_settings(impl->dev_out, impl->opt.settings); !r) {
             return std::unexpected(r.error());
@@ -451,22 +453,22 @@ xxrf::core::Result<DualRx> DualRx::start(xxrf::core::Device trigger_out_dev, xxr
         }
     }
 
-    // Configure sync (hw trigger, clkin/clkout policy).
+    
     if (auto r = configure_sync(impl->dev_out, impl->dev_in, impl->opt.sync); !r) {
         return std::unexpected(r.error());
     }
 
-    // Start coordinator first (it will block on cv).
+    
     impl->coordinator = std::thread([p = impl.get()] { p->coordinator_loop(); });
 
-    // Start TriggerIn stream first (so it can enter wait-for-trigger state),
-    // then wait arm_delay, then start TriggerOut stream (which emits trigger output on start).
+    
+    
     {
         auto rx_in_res = xxrf::stream::RxStream::start(
             impl->dev_in, [p = impl.get()](const xxrf::stream::RxBlock& blk) { p->push_block(false, blk); },
             impl->opt.stream);
         if (!rx_in_res) {
-            impl->request_stop();
+            impl->request_stop(true);
             {
                 std::lock_guard lk(impl->m);
                 impl->in_done = true;
@@ -490,8 +492,8 @@ xxrf::core::Result<DualRx> DualRx::start(xxrf::core::Device trigger_out_dev, xxr
             impl->dev_out, [p = impl.get()](const xxrf::stream::RxBlock& blk) { p->push_block(true, blk); },
             impl->opt.stream);
         if (!rx_out_res) {
-            // stop in-stream and coordinator
-            impl->request_stop();
+            
+            impl->request_stop(true);
 
             (void)impl->rx_in->stop();
 
@@ -514,7 +516,7 @@ xxrf::core::Result<DualRx> DualRx::start(xxrf::core::Device trigger_out_dev, xxr
 
 DualRx::DualRx(DualRx&& other) noexcept : impl_(other.impl_) { other.impl_ = nullptr; }
 
-DualRx& DualRx::operator=(DualRx&& other) noexcept {
+DualRx& DualRx::operator=(DualRx&& other) {
     if (this == &other) {
         return *this;
     }
@@ -526,12 +528,15 @@ DualRx& DualRx::operator=(DualRx&& other) noexcept {
 }
 
 DualRx::~DualRx() noexcept {
-    (void)stop();
+    try {
+        (void)stop();
+    } catch (...) {
+    }
     delete impl_;
     impl_ = nullptr;
 }
 
-xxrf::core::Status DualRx::stop() noexcept {
+xxrf::core::Status DualRx::stop(bool drop_queued) {
     if (impl_ == nullptr) {
         return xxrf::core::ok();
     }
@@ -541,16 +546,26 @@ xxrf::core::Status DualRx::stop() noexcept {
             make_local_error("[DualRx::stop] must not be called from DualRxHandler; use request_stop()"));
     }
 
-    impl_->request_stop(); // выставит stop_requested, дернёт stream request_stop, выставит done, notify_all
+    impl_->request_stop(drop_queued);
 
     xxrf::core::Status e1 = xxrf::core::ok();
     xxrf::core::Status e2 = xxrf::core::ok();
 
     if (impl_->rx_out) {
         e1 = impl_->rx_out->stop();
+        {
+            std::lock_guard lk(impl_->m);
+            impl_->out_done = true;
+        }
+        impl_->cv.notify_all();
     }
     if (impl_->rx_in) {
         e2 = impl_->rx_in->stop();
+        {
+            std::lock_guard lk(impl_->m);
+            impl_->in_done = true;
+        }
+        impl_->cv.notify_all();
     }
 
     if (impl_->coordinator.joinable()) {
@@ -569,11 +584,11 @@ xxrf::core::Status DualRx::stop() noexcept {
     return xxrf::core::ok();
 }
 
-void DualRx::request_stop() noexcept {
+void DualRx::request_stop(bool drop_queued) noexcept {
     if (impl_ == nullptr) {
         return;
     }
-    impl_->request_stop();
+    impl_->request_stop(drop_queued);
 }
 
 DualRxStats DualRx::stats() const noexcept {
@@ -600,4 +615,4 @@ xxrf::core::Device& DualRx::device_trigger_out() noexcept { return impl_->dev_ou
 
 xxrf::core::Device& DualRx::device_trigger_in() noexcept { return impl_->dev_in; }
 
-} // namespace xxrf::sync
+} 

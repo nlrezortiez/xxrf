@@ -17,9 +17,13 @@ inline constexpr double kSpeedOfLight = 299'792'458.0;
     return kSpeedOfLight / static_cast<double>(center_freq_hz);
 }
 
+[[nodiscard]] inline double max_unambiguous_baseline_m(std::uint64_t center_freq_hz) noexcept {
+    return wavelength_m(center_freq_hz) * 0.5;
+}
+
 struct PhaseToAngleResult final {
-    double theta_rad = 0.0;   // relative to broadside
-    double azimuth_rad = 0.0; // global (baseline azimuth applied)
+    double theta_rad = 0.0;   
+    double azimuth_rad = 0.0; 
     bool ok = false;
 };
 
@@ -31,17 +35,17 @@ struct PhaseToAngleResult final {
     const double lambda = wavelength_m(center_freq_hz);
 
     if (!(d > 0.0) || !(lambda > 0.0)) {
-        return out; // ok=false
+        return out; 
     }
 
-    // sin(theta) = phase * lambda / (2*pi*d)
+    
     const double denom = (2.0 * std::numbers::pi * d);
     const double sin_theta = (phase_rad * lambda) / denom;
 
     double s = sin_theta;
     if (std::abs(s) > 1.0) {
         if (!clamp_sin) {
-            return out; // ok=false
+            return out; 
         }
         s = std::copysign(1.0, s);
     }
@@ -52,4 +56,4 @@ struct PhaseToAngleResult final {
     return out;
 }
 
-} // namespace xxrf::aoa
+} 

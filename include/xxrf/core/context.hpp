@@ -7,13 +7,14 @@
 
 namespace xxrf::core {
 
-/*
- *  RAII wrapper above hackrf_init()/hackrf_exit()
- */
+ 
+
+
 
 class Context final {
 public:
     static Result<Context> create();
+    static bool is_active() noexcept;
 
     Context() = delete;
     Context(const Context&) = delete;
@@ -24,8 +25,8 @@ public:
 
     ~Context();
 
-    std::string version() const noexcept;
-    std::string release() const noexcept;
+    std::string version() const;
+    std::string release() const;
 
 private:
     explicit Context(bool active) noexcept : active_(active) {}
@@ -33,4 +34,4 @@ private:
     static inline std::atomic_uint ref_count_{0};
 };
 
-} // namespace xxrf::core
+} 

@@ -1,6 +1,5 @@
 #pragma once
 
-#include "xxrf/core/context.hpp"
 #include "xxrf/core/device.hpp"
 #include "xxrf/core/error.hpp"
 #include "xxrf/stream/rx_stream.hpp"
@@ -83,25 +82,24 @@ using DualRxHandler = std::function<void(const DualRxBlockView&)>;
 
 class DualRx final {
 public:
-    static xxrf::core::Result<DualRx> start(xxrf::core::Context& ctx, const DualRxDeviceId& trigger_out,
-                                            const DualRxDeviceId& trigger_in, DualRxHandler handler,
-                                            DualRxOptions opt = {}) noexcept;
+    static xxrf::core::Result<DualRx> start(const DualRxDeviceId& trigger_out, const DualRxDeviceId& trigger_in,
+                                            DualRxHandler handler, DualRxOptions opt = {});
 
     static xxrf::core::Result<DualRx> start(xxrf::core::Device trigger_out_dev, xxrf::core::Device trigger_in_dev,
-                                            DualRxHandler handler, DualRxOptions opt = {}) noexcept;
+                                            DualRxHandler handler, DualRxOptions opt = {});
 
     DualRx() = delete;
     DualRx(const DualRx&) = delete;
     DualRx& operator=(const DualRx&) = delete;
 
     DualRx(DualRx&&) noexcept;
-    DualRx& operator=(DualRx&&) noexcept;
+    DualRx& operator=(DualRx&&);
 
     ~DualRx() noexcept;
 
-    xxrf::core::Status stop() noexcept;
+    xxrf::core::Status stop(bool drop_queued = true);
 
-    void request_stop() noexcept;
+    void request_stop(bool drop_queued = true) noexcept;
 
     DualRxStats stats() const noexcept;
 
@@ -115,4 +113,4 @@ private:
     Impl* impl_{nullptr};
 };
 
-} // namespace xxrf::sync
+} 

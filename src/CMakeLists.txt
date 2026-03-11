@@ -1,4 +1,4 @@
-# Helper: apply common settings to either INTERFACE or normal libs.
+
 function(xxrf_apply_common target)
   get_target_property(_type ${target} TYPE)
 
@@ -16,7 +16,7 @@ function(xxrf_apply_common target)
     )
   endif()
 
-  # Warnings for our targets only
+  
   if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     if (_type STREQUAL "INTERFACE_LIBRARY")
       target_compile_options(${target} INTERFACE
@@ -57,11 +57,11 @@ function(xxrf_apply_common target)
   endif()
 endfunction()
 
-# ------------------------------------------------------------------------------
-# Core layer
-# Recommended sources location:
-#   src/core/*.cpp
-# ------------------------------------------------------------------------------
+
+
+
+
+
 file(GLOB_RECURSE XXRF_CORE_SOURCES CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_LIST_DIR}/core/*.cpp"
   "${CMAKE_CURRENT_LIST_DIR}/core/*.cc"
@@ -78,7 +78,7 @@ endif()
 add_library(xxrf::core ALIAS xxrf_core)
 xxrf_apply_common(xxrf_core)
 
-# Link against libhackrf (bundled or external)
+
 get_target_property(_xxrf_core_type xxrf_core TYPE)
 if (_xxrf_core_type STREQUAL "INTERFACE_LIBRARY")
   target_link_libraries(xxrf_core INTERFACE ${XXRF_LIBHACKRF_TARGET})
@@ -86,11 +86,11 @@ else()
   target_link_libraries(xxrf_core PUBLIC ${XXRF_LIBHACKRF_TARGET})
 endif()
 
-# ------------------------------------------------------------------------------
-# Stream layer (ring buffers, consumer thread, etc.)
-# Recommended sources location:
-#   src/stream/*.cpp
-# ------------------------------------------------------------------------------
+
+
+
+
+
 file(GLOB_RECURSE XXRF_STREAM_SOURCES CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_LIST_DIR}/stream/*.cpp"
   "${CMAKE_CURRENT_LIST_DIR}/stream/*.cc"
@@ -114,10 +114,10 @@ else()
   target_link_libraries(xxrf_stream PUBLIC xxrf::core Threads::Threads)
 endif()
 
-# ------------------------------------------------------------------------------
-# Sync layer (dual-device start, trigger orchestration, alignment helpers)
-#   src/sync/*.cpp
-# ------------------------------------------------------------------------------
+
+
+
+
 file(GLOB_RECURSE XXRF_SYNC_SOURCES CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_LIST_DIR}/sync/*.cpp"
   "${CMAKE_CURRENT_LIST_DIR}/sync/*.cc"
@@ -141,10 +141,10 @@ else()
   target_link_libraries(xxrf_sync PUBLIC xxrf::stream)
 endif()
 
-# --------------------------------------------------------------------------
-# AoA layer
-# src/aoa/*.cpp
-# --------------------------------------------------------------------------
+
+
+
+
 file(GLOB_RECURSE XXRF_AOA_SOURCES CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_LIST_DIR}/aoa/*.cpp"
   "${CMAKE_CURRENT_LIST_DIR}/aoa/*.cc"
@@ -168,9 +168,9 @@ else()
   target_link_libraries(xxrf_aoa INTERFACE xxrf::sync)
 endif()
 
-# ------------------------------------------------------------------------------
-# Umbrella target: link one thing from apps/examples/tests
-# ------------------------------------------------------------------------------
+
+
+
 add_library(xxrf INTERFACE)
 add_library(xxrf::xxrf ALIAS xxrf)
 

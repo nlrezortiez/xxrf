@@ -1,3 +1,4 @@
+#include "xxrf/core/context.hpp"
 #include "xxrf/core/device_list.hpp"
 
 #include <utility>
@@ -5,24 +6,30 @@
 namespace xxrf::core {
 
 Result<DeviceList> DeviceList::enumerate() {
+    auto ctx_guard = Context::create();
+    if (!ctx_guard) {
+        return std::unexpected<Error>(ctx_guard.error());
+    }
+
     hackrf_device_list_t* list = hackrf_device_list();
     if (list == nullptr) {
         return std::unexpected<Error>(
             Error{.code = -1, .message = "[DeviceList::enumerate] hackrf_device_list(): returned null"});
     }
 
-    return DeviceList{list};
+    return DeviceList{list, std::optional<Context>{std::move(*ctx_guard)}};
 }
 
-DeviceList::DeviceList(DeviceList&& other) noexcept : list_(std::exchange(other.list_, nullptr)) {}
+DeviceList::DeviceList(DeviceList&& other) noexcept
+    : ctx_guard_(std::move(other.ctx_guard_)), list_(std::exchange(other.list_, nullptr)) {}
 
 DeviceList& DeviceList::operator=(DeviceList&& other) noexcept {
     if (this != &other) {
-        /* destroy previous list */
-        this->~DeviceList();
-
-        list_ = other.list_;
-        other.list_ = nullptr;
+        if (list_ != nullptr) {
+            hackrf_device_list_free(list_);
+        }
+        ctx_guard_ = std::move(other.ctx_guard_);
+        list_ = std::exchange(other.list_, nullptr);
     }
 
     return *this;
@@ -55,4 +62,4 @@ std::vector<DeviceInfo> DeviceList::devices() const {
     return out;
 }
 
-} // namespace xxrf::core
+} 

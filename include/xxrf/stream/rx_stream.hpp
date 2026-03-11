@@ -33,18 +33,18 @@ using RxHandler = std::function<void(const RxBlock&)>;
 class RxStream final {
 public:
     static xxrf::core::Result<RxStream> start(xxrf::core::Device& dev, RxHandler handler,
-                                              RxStreamOptions opt = {}) noexcept;
+                                              RxStreamOptions opt = {});
 
     RxStream() = delete;
     RxStream(const RxStream&) = delete;
     RxStream& operator=(const RxStream&) = delete;
 
     RxStream(RxStream&&) noexcept;
-    RxStream& operator=(RxStream&&) noexcept;
+    RxStream& operator=(RxStream&&);
 
     ~RxStream() noexcept;
 
-    xxrf::core::Status stop() noexcept;
+    xxrf::core::Status stop();
     void request_stop() noexcept;
     RxStats stats() const noexcept;
 
@@ -54,4 +54,4 @@ private:
     Impl* impl_{nullptr};
 };
 
-} // namespace xxrf::stream
+} 

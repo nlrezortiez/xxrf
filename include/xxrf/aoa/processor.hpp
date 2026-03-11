@@ -7,10 +7,10 @@
 
 namespace xxrf::aoa {
 
-// AoAProcessor is NOT thread-safe; expected usage: called from a single pipeline thread.
+
 class Processor final {
 public:
-    static xxrf::core::Result<Processor> create(Config cfg, Calibration cal = {}) noexcept;
+    static xxrf::core::Result<Processor> create(Config cfg, Calibration cal = {});
 
     Processor() = delete;
     Processor(const Processor&) = delete;
@@ -29,9 +29,9 @@ public:
     Config config() const noexcept;
     Stats stats() const noexcept;
 
-    // Push paired IQ frame. May emit zero or more estimates through `emit`.
-    // Lifetime rule: spans inside emitted Estimate are none; Estimate is value type.
-    void push(const InputFrameView& frame, FunctionRef<void(const Estimate&)> emit) noexcept;
+    
+    
+    void push(const InputFrameView& frame, FunctionRef<void(const Estimate&)> emit);
 
 private:
     struct Impl;
@@ -39,4 +39,4 @@ private:
     Impl* impl_{nullptr};
 };
 
-} // namespace xxrf::aoa
+} 

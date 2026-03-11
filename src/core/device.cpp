@@ -1,3 +1,8 @@
+#include "xxrf/core/context.hpp"
+
+#include <mutex>
+#include <optional>
+#include <string>
 #include <utility>
 #include <xxrf/core/device.hpp>
 
@@ -11,62 +16,86 @@ static inline Result<void> check(int rc, const char* where) {
     return std::unexpected(make_error(rc, where));
 }
 
+struct Device::State final {
+    explicit State(hackrf_device* device, Context ctx) noexcept : ctx_guard(std::move(ctx)), dev(device) {}
+
+    ~State() noexcept {
+        if (dev == nullptr) {
+            return;
+        }
+
+        std::scoped_lock lk(api_mtx);
+
+        const int streaming = hackrf_is_streaming(dev);
+        if (streaming == HACKRF_TRUE) {
+            (void)hackrf_stop_rx(dev);
+            (void)hackrf_stop_tx(dev);
+        }
+
+        (void)hackrf_close(dev);
+        dev = nullptr;
+    }
+
+    std::mutex api_mtx;
+    std::optional<Context> ctx_guard;
+    hackrf_device* dev{nullptr};
+};
+
 Result<Device> Device::open_first() {
+    auto ctx_guard = Context::create();
+    if (!ctx_guard) {
+        return std::unexpected(ctx_guard.error());
+    }
+
     hackrf_device* dev = nullptr;
     const int rc = hackrf_open(&dev);
-    check(rc, "[Device::open_first] hackrf_open()");
-    return Device{dev};
+    if (rc != HACKRF_SUCCESS) {
+        return std::unexpected(make_error(rc, "[Device::open_first] hackrf_open()"));
+    }
+    return Device{std::make_shared<State>(dev, std::move(*ctx_guard))};
 }
 
 Result<Device> Device::open_by_serial(std::string_view serial) {
+    auto ctx_guard = Context::create();
+    if (!ctx_guard) {
+        return std::unexpected(ctx_guard.error());
+    }
+
+    const std::string serial_copy{serial};
     hackrf_device* dev = nullptr;
-    const int rc = hackrf_open_by_serial(serial.data(), &dev);
-    check(rc, "[Device::open_by_serial] hackrf_open_by_serial");
-    return Device{dev};
+    const int rc = hackrf_open_by_serial(serial_copy.c_str(), &dev);
+    if (rc != HACKRF_SUCCESS) {
+        return std::unexpected(make_error(rc, "[Device::open_by_serial] hackrf_open_by_serial"));
+    }
+    return Device{std::make_shared<State>(dev, std::move(*ctx_guard))};
 }
 
-Device::Device(Device&& other) noexcept : dev_(std::exchange(other.dev_, nullptr)) {}
+Device::Device(Device&& other) noexcept : state_(std::move(other.state_)) {}
 
 Device& Device::operator=(Device&& other) noexcept {
     if (this != &other) {
-        this->~Device();
-        dev_ = std::exchange(other.dev_, nullptr);
+        state_ = std::move(other.state_);
     }
     return *this;
 }
 
-Device::~Device() { close(); }
+Device::~Device() = default;
 
-Status Device::close() {
-    if (dev_ == nullptr) {
-        return ok();
-    }
+bool Device::is_open() const noexcept { return state_ != nullptr && state_->dev != nullptr; }
 
-    std::scoped_lock lc(api_mtx_);
+hackrf_device* Device::native_handle() noexcept { return state_ ? state_->dev : nullptr; }
 
-    const int streaming = hackrf_is_streaming(dev_);
-    if (streaming == HACKRF_TRUE) {
-        hackrf_stop_rx(dev_);
-        hackrf_stop_tx(dev_);
-    }
+const hackrf_device* Device::native_handle() const noexcept { return state_ ? state_->dev : nullptr; }
 
-    const int rc = hackrf_close(dev_);
-    dev_ = nullptr;
-    if (rc != HACKRF_SUCCESS) {
-        return std::unexpected(make_error(rc, "[Device::close] hackrf_close"));
-    }
-    return ok();
-}
-
-Status Device::stop_rx() noexcept {
-    if (dev_ == nullptr) {
+Status Device::stop_rx() {
+    if (!state_ || state_->dev == nullptr) {
         return xxrf::core::ok();
     }
 
-    std::scoped_lock lk(api_mtx_);
-    const int streaming = hackrf_is_streaming(dev_);
+    std::scoped_lock lk(state_->api_mtx);
+    const int streaming = hackrf_is_streaming(state_->dev);
     if (streaming == HACKRF_TRUE) {
-        const int rc = hackrf_stop_rx(dev_);
+        const int rc = hackrf_stop_rx(state_->dev);
         if (rc != HACKRF_SUCCESS) {
             return std::unexpected(make_error(rc, "[Device::stop_rx] hackrf_stop_rx"));
         }
@@ -75,63 +104,72 @@ Status Device::stop_rx() noexcept {
 }
 
 Status Device::set_sample_rate(const double hz) {
-    if (dev_ == nullptr) {
+    if (!state_ || state_->dev == nullptr) {
         return std::unexpected(Error{.code = -1, .message = "[Device::set_sample_rate] null handle"});
     }
-    return check(hackrf_set_sample_rate(dev_, hz), "[Device::set_sample_rate] hackrf_set_sample_rate");
+    std::scoped_lock lk(state_->api_mtx);
+    return check(hackrf_set_sample_rate(state_->dev, hz), "[Device::set_sample_rate] hackrf_set_sample_rate");
 }
 
 Status Device::set_center_freq(const std::uint64_t hz) {
-    if (dev_ == nullptr) {
+    if (!state_ || state_->dev == nullptr) {
         return std::unexpected(Error{.code = -1, .message = "[Device::set_center_freq] null handle"});
     }
-    return check(hackrf_set_freq(dev_, hz), "[Device::set_center_freq] hackrf_set_freq");
+    std::scoped_lock lk(state_->api_mtx);
+    return check(hackrf_set_freq(state_->dev, hz), "[Device::set_center_freq] hackrf_set_freq");
 }
 
 Status Device::set_lna_gain(std::uint32_t db) {
-    if (dev_ == nullptr) {
+    if (!state_ || state_->dev == nullptr) {
         return std::unexpected(Error{.code = -1, .message = "[Device::set_lna_gain] null handle"});
     }
-    return check(hackrf_set_lna_gain(dev_, db), "[Device::set_lna_gain] hackrf_set_lna_gain");
+    std::scoped_lock lk(state_->api_mtx);
+    return check(hackrf_set_lna_gain(state_->dev, db), "[Device::set_lna_gain] hackrf_set_lna_gain");
 }
 
 Status Device::set_vga_gain(std::uint32_t db) {
-    if (dev_ == nullptr) {
+    if (!state_ || state_->dev == nullptr) {
         return std::unexpected(Error{.code = -1, .message = "[Device::set_vga_gain] null handle"});
     }
-    return check(hackrf_set_vga_gain(dev_, db), "[Device::set_vga_gain] hackrf_set_vga_gain");
+    std::scoped_lock lk(state_->api_mtx);
+    return check(hackrf_set_vga_gain(state_->dev, db), "[Device::set_vga_gain] hackrf_set_vga_gain");
 }
 
 Status Device::set_amp_enable(bool on) {
-    if (dev_ == nullptr) {
+    if (!state_ || state_->dev == nullptr) {
         return std::unexpected(Error{.code = -1, .message = "[Device::set_amp_enable] null handle"});
     }
-    return check(hackrf_set_amp_enable(dev_, on ? 1U : 0U), "[Device::set_amp_enable] hackrf_set_amp_enable");
+    std::scoped_lock lk(state_->api_mtx);
+    return check(hackrf_set_amp_enable(state_->dev, on ? 1U : 0U), "[Device::set_amp_enable] hackrf_set_amp_enable");
 }
 
 Status Device::set_bias_tee_enable(bool on) {
-    if (dev_ == nullptr) {
+    if (!state_ || state_->dev == nullptr) {
         return std::unexpected(Error{.code = -1, .message = "[Device::set_bias_tee_enable] null handle"});
     }
-    return check(hackrf_set_antenna_enable(dev_, on ? 1U : 0U),
+    std::scoped_lock lk(state_->api_mtx);
+    return check(hackrf_set_antenna_enable(state_->dev, on ? 1U : 0U),
                  "[Device::set_bias_tee_enable] hackrf_set_antenna_enable");
 }
 
 Status Device::set_hw_sync_mode(bool on) {
-    if (dev_ == nullptr) {
+    if (!state_ || state_->dev == nullptr) {
         return std::unexpected(Error{.code = -1, .message = "[Device::set_hw_sync_mode] null handle"});
     }
 
-    return check(hackrf_set_hw_sync_mode(dev_, on ? 1U : 0U), "[Device::set_hw_sync_enable] hackrf_set_hw_sync_mode");
+    std::scoped_lock lk(state_->api_mtx);
+    return check(hackrf_set_hw_sync_mode(state_->dev, on ? 1U : 0U),
+                 "[Device::set_hw_sync_enable] hackrf_set_hw_sync_mode");
 }
 
-Status Device::set_clkout_enable(bool on) noexcept {
-    if (dev_ == nullptr) {
+Status Device::set_clkout_enable(bool on) {
+    if (!state_ || state_->dev == nullptr) {
         return std::unexpected(Error{.code = -1, .message = "[Device::set_clkout_enable] null handle"});
     }
 
+    std::scoped_lock lk(state_->api_mtx);
     const std::uint8_t v = on ? 1U : 0U;
-    const int rc = hackrf_set_clkout_enable(dev_, v);
+    const int rc = hackrf_set_clkout_enable(state_->dev, v);
     if (rc != HACKRF_SUCCESS) {
         return std::unexpected(make_error(rc, "[Device::set_clkout_enable] hackrf_set_clkout_enable"));
     }
@@ -139,15 +177,16 @@ Status Device::set_clkout_enable(bool on) noexcept {
 }
 
 Result<std::uint8_t> Device::clkin_detected() {
-    if (dev_ == nullptr) {
+    if (!state_ || state_->dev == nullptr) {
         return std::unexpected(Error{.code = -1, .message = "[Device::clkin_detected] null handle"});
     }
+    std::scoped_lock lk(state_->api_mtx);
     std::uint8_t status = 0;
-    const int rc = hackrf_get_clkin_status(dev_, &status);
+    const int rc = hackrf_get_clkin_status(state_->dev, &status);
     if (rc != HACKRF_SUCCESS) {
         return std::unexpected(make_error(rc, "[Device::clkin_detected] hackrf_get_clkin_status"));
     }
     return status;
 }
 
-} // namespace xxrf::core
+} 

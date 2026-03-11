@@ -10,10 +10,10 @@ namespace xxrf::core {
 
 struct Error final {
 
-    /* Native libhackrf error code */
+     
     int code{};
 
-    /* Human readable message */
+     
     std::string message{};
 };
 
@@ -31,4 +31,4 @@ inline Error make_error(int code, std::string_view where) {
 
 inline Status ok() { return {}; }
 
-} // namespace xxrf::core
+} 
