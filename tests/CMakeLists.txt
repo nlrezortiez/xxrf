@@ -14,7 +14,7 @@ foreach(src ${TEST_SOURCES})
   set(tgt "xxrf_test_${name}")
 
   add_executable(${tgt} ${src})
-  target_link_libraries(${tgt} PRIVATE cxx_hackrf::cxx_hackrf)
+  target_link_libraries(${tgt} PRIVATE xxrf::xxrf)
 
   add_test(NAME ${tgt} COMMAND ${tgt})
 endforeach()
