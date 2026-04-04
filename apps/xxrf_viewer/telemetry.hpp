@@ -12,6 +12,7 @@ struct AoASample final {
     std::uint64_t sample_index = 0;
     float theta_rad = 0.0f;
     float coherence = 0.0f;
+    float signal_power_dbfs = -120.0f;
 };
 
 template <std::size_t N>

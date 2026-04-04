@@ -1,1 +1,2 @@
 add_subdirectory(xxrf_viewer)
+add_subdirectory(xxrf_aoa_probe)

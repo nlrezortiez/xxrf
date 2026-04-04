@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <deque>
 #include <format>
 #include <imgui.h>
 #include <numbers>
@@ -160,6 +161,39 @@ void draw_hint_box(const char* id, const char* title, const char* message, float
     ImGui::PopID();
 }
 
+void draw_threshold_overlay(float min_v, float max_v, float threshold_v, const ImVec4& color) {
+    const ImVec2 rect_min = ImGui::GetItemRectMin();
+    const ImVec2 rect_max = ImGui::GetItemRectMax();
+    if (rect_max.y <= rect_min.y || max_v <= min_v) {
+        return;
+    }
+
+    const float norm = std::clamp((threshold_v - min_v) / (max_v - min_v), 0.0f, 1.0f);
+    const float y = rect_max.y - ((rect_max.y - rect_min.y) * norm);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddLine(ImVec2(rect_min.x, y), ImVec2(rect_max.x, y), ImGui::ColorConvertFloat4ToU32(color), 1.5f);
+}
+
+MeasurementSummary compute_window_summary(const std::deque<LiveWindowSample>& samples) {
+    MeasurementSummary out;
+    if (samples.empty()) {
+        return out;
+    }
+
+    CalibrationAccumulator acc;
+    acc.reset();
+    for (const auto& sample : samples) {
+        xxrf_viewer::AoASample aoa;
+        aoa.t_ns = sample.t_ns;
+        aoa.sample_index = sample.sample_index;
+        aoa.theta_rad = sample.theta_deg * (std::numbers::pi_v<float> / 180.0f);
+        aoa.coherence = sample.coherence;
+        aoa.signal_power_dbfs = sample.power_dbfs;
+        acc.add(aoa);
+    }
+    return acc.summary();
+}
+
 } 
 
 void load_viewer_fonts() {
@@ -251,9 +285,15 @@ void render_viewer_ui(ViewerState& vs) {
     const bool running = vs.stream.has_value();
     const xxrf::aoa::rt::StreamStats live_stats = vs.stream ? vs.stream->stats() : xxrf::aoa::rt::StreamStats{};
     const std::uint64_t frame_now_ns = now_monotonic_ns();
-    const std::uint64_t sample_age_ns =
+    const std::uint64_t raw_sample_age_ns =
         vs.has_fix && (frame_now_ns >= vs.last.t_ns) ? (frame_now_ns - vs.last.t_ns) : 0ULL;
-    const bool fresh_fix = vs.has_fix && (sample_age_ns <= ViewerState::stale_fix_timeout_ns);
+    const std::uint64_t valid_sample_age_ns =
+        vs.has_valid_fix && (frame_now_ns >= vs.last_valid.t_ns) ? (frame_now_ns - vs.last_valid.t_ns) : 0ULL;
+    const bool fresh_raw_fix = vs.has_fix && (raw_sample_age_ns <= ViewerState::stale_fix_timeout_ns);
+    const bool fresh_valid_fix = vs.has_valid_fix && (valid_sample_age_ns <= ViewerState::stale_fix_timeout_ns);
+    const bool power_ok = fresh_raw_fix && vs.signal_gate_open;
+    const bool display_fix = fresh_valid_fix && power_ok;
+    const MeasurementSummary rolling_summary = compute_window_summary(vs.rolling_samples);
 
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -271,19 +311,30 @@ void render_viewer_ui(ViewerState& vs) {
         (vs.idx_in >= 0 && vs.idx_in < static_cast<int>(vs.serials.size())) ? vs.serials[static_cast<std::size_t>(vs.idx_in)].c_str() : "-";
 
     float theta_disp = 0.0F;
-    if (vs.smooth_init) {
+    if (display_fix && vs.smooth_init) {
         theta_disp = std::atan2(vs.sx, vs.sy);
-    } else if (vs.has_fix) {
-        theta_disp = vs.last.theta_rad;
+    } else if (fresh_valid_fix) {
+        theta_disp = vs.last_valid.theta_rad;
     }
 
-    const std::string theta_value = fresh_fix
+    const std::string theta_value = display_fix
                                         ? std::format("{:+.1f}°", double(theta_disp) * (180.0 / std::numbers::pi))
-                                        : (vs.has_fix ? "устарело" : "нет оценки");
-    const std::string coherence_value = fresh_fix ? std::format("{:.3f}", vs.last.coherence) : "--";
-    const std::string sample_age_value = std::format("{:.0f} мс", double(sample_age_ns) * 1e-6);
+                                        : (fresh_raw_fix ? "Below Threshold" : (vs.has_valid_fix ? "устарело" : "нет оценки"));
+    const std::string coherence_value = display_fix ? std::format("{:.3f}", vs.last_valid.coherence) : "--";
+    const std::string signal_power_value = fresh_raw_fix ? std::format("{:.1f} dBFS", vs.last.signal_power_dbfs) : "--";
+    const std::string sample_age_value =
+        display_fix ? std::format("{:.0f} мс", double(valid_sample_age_ns) * 1e-6) : "--";
     const std::string sample_index_value =
-        vs.has_fix ? std::format("{}", static_cast<unsigned long long>(vs.last.sample_index)) : "--";
+        display_fix ? std::format("{}", static_cast<unsigned long long>(vs.last_valid.sample_index)) : "--";
+    const std::string rolling_theta_avg =
+        rolling_summary.valid ? std::format("{:+.2f}°", rolling_summary.theta_circular_avg_deg) : "--";
+    const std::string rolling_theta_span =
+        rolling_summary.valid ? std::format("{:+.1f} .. {:+.1f}", rolling_summary.theta_min_deg, rolling_summary.theta_max_deg)
+                              : "--";
+    const std::string rolling_coh_avg =
+        rolling_summary.valid ? std::format("{:.3f}", rolling_summary.coherence_avg) : "--";
+    const std::string rolling_power_avg =
+        rolling_summary.valid ? std::format("{:.2f} dBFS", rolling_summary.power_avg_dbfs) : "--";
 
     const float header_h = 60.0f;
     begin_panel("header", ImVec2(0.0f, header_h), ImVec4(0.935f, 0.948f, 0.964f, 1.0f));
@@ -472,6 +523,10 @@ void render_viewer_ui(ViewerState& vs) {
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("AoA")) {
+                std::array<float, ViewerState::history_size> power_plot{};
+                const std::size_t power_points =
+                    build_history_plot(vs.power_history, vs.power_head, vs.power_count, power_plot);
+                constexpr float power_control_width = 200.0f;
                 if (!running) {
                     ImGui::PushItemWidth(control_input_width);
                     ImGui::InputInt("Окно, отсчёты", &vs.window_samples);
@@ -486,7 +541,102 @@ void render_viewer_ui(ViewerState& vs) {
                 }
                 ImGui::PushItemWidth(control_input_width);
                 ImGui::InputDouble("Тау сглаживания (с)", &vs.smooth_tau_s, 0.02, 0.1, "%.3f");
+                ImGui::InputDouble("Фазовая поправка (°)", &vs.cal_phase_deg, 0.1, 1.0, "%.3f");
+                ImGui::InputDouble("Окно статистики (с)", &vs.rolling_window_s, 0.5, 1.0, "%.1f");
+                ImGui::InputFloat("Гистерезис порога (дБ)", &vs.signal_threshold_hysteresis_db, 0.1f, 0.5f, "%.1f");
+                ImGui::InputDouble("Калибровка, длит. (с)", &vs.calibration_duration_s, 1.0, 5.0, "%.1f");
                 ImGui::PopItemWidth();
+                ImGui::PushItemWidth(power_control_width);
+                ImGui::SliderFloat("Порог мощности", &vs.signal_threshold_dbfs, -90.0f, 0.0f, "%.1f dBFS");
+                ImGui::PopItemWidth();
+                if (g_font_ui_small != nullptr) {
+                    ImGui::PushFont(g_font_ui_small);
+                }
+                ImGui::TextColored(power_ok ? ImVec4(0.18f, 0.62f, 0.30f, 1.0f) : ImVec4(0.78f, 0.22f, 0.20f, 1.0f),
+                                   "Текущая мощность: %s", signal_power_value.c_str());
+                ImGui::TextColored(ImVec4(0.300f, 0.380f, 0.470f, 1.0f), "Порог входа/выхода: %.1f / %.1f dBFS",
+                                   vs.signal_threshold_dbfs,
+                                   vs.signal_threshold_dbfs - std::max(0.1f, vs.signal_threshold_hysteresis_db));
+                if (g_font_ui_small != nullptr) {
+                    ImGui::PopFont();
+                }
+                if (g_font_ui_small != nullptr) {
+                    ImGui::PushFont(g_font_ui_small);
+                }
+                ImGui::TextColored(ImVec4(0.300f, 0.380f, 0.470f, 1.0f), "История мощности");
+                if (g_font_ui_small != nullptr) {
+                    ImGui::PopFont();
+                }
+                const float power_plot_h = 62.0f;
+                if (power_points > 1) {
+                    const float power_norm =
+                        std::clamp((fresh_raw_fix ? vs.last.signal_power_dbfs : -90.0f) - vs.signal_threshold_dbfs +
+                                       18.0f,
+                                   0.0f, 36.0f) /
+                        36.0f;
+                    const ImVec4 power_plot_low(0.78f, 0.22f, 0.20f, 1.0f);
+                    const ImVec4 power_plot_high(0.18f, 0.62f, 0.30f, 1.0f);
+                    const ImVec4 power_plot_col(
+                        power_plot_low.x + ((power_plot_high.x - power_plot_low.x) * power_norm),
+                        power_plot_low.y + ((power_plot_high.y - power_plot_low.y) * power_norm),
+                        power_plot_low.z + ((power_plot_high.z - power_plot_low.z) * power_norm), 1.0f);
+                    ImGui::PushStyleColor(ImGuiCol_PlotLines, power_plot_col);
+                    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.942f, 0.953f, 0.965f, 1.0f));
+                    ImGui::PlotLines("##power_plot", power_plot.data(), static_cast<int>(power_points), 0, nullptr,
+                                     -90.0f, 0.0f, ImVec2(-1.0f, power_plot_h));
+                    ImGui::PopStyleColor(2);
+                    draw_threshold_overlay(-90.0f, 0.0f, vs.signal_threshold_dbfs, ImVec4(0.78f, 0.22f, 0.20f, 1.0f));
+                } else {
+                    draw_hint_box("power_empty", "", "Появится после накопления уровня сигнала.", power_plot_h);
+                }
+                ImGui::Separator();
+                if (g_font_ui_small != nullptr) {
+                    ImGui::PushFont(g_font_ui_small);
+                }
+                ImGui::TextColored(ImVec4(0.300f, 0.380f, 0.470f, 1.0f), "Калибровка");
+                if (g_font_ui_small != nullptr) {
+                    ImGui::PopFont();
+                }
+                if (!running) {
+                    ImGui::TextColored(ImVec4(0.470f, 0.550f, 0.630f, 1.0f), "Запусти поток, чтобы начать калибровку.");
+                } else if (!vs.calibration_running) {
+                    if (ImGui::Button("Старт калибровки")) {
+                        vs.calibration_acc.reset();
+                        vs.calibration_last = {};
+                        vs.calibration_started_ns = frame_now_ns;
+                        vs.calibration_running = true;
+                    }
+                } else {
+                    const double elapsed_s = double(frame_now_ns - vs.calibration_started_ns) * 1e-9;
+                    const double progress = std::clamp(elapsed_s / std::max(1.0, vs.calibration_duration_s), 0.0, 1.0);
+                    ImGui::Text("Идёт калибровка: %.1f / %.1f с", elapsed_s, vs.calibration_duration_s);
+                    ImGui::ProgressBar(static_cast<float>(progress), ImVec2(power_control_width, 0.0f));
+                    if (ImGui::Button("Отменить")) {
+                        vs.calibration_running = false;
+                        vs.calibration_acc.reset();
+                    }
+                }
+                if (vs.calibration_last.valid) {
+                    ImGui::Dummy(ImVec2(0.0f, 6.0f));
+                    draw_compact_row("Калибровка θ avg", std::format("{:+.3f}°", vs.calibration_last.theta_circular_avg_deg),
+                                     ImVec4(0.94f, 0.98f, 0.995f, 1.0f));
+                    draw_compact_row("Калибровка coh avg", std::format("{:.4f}", vs.calibration_last.coherence_avg),
+                                     ImVec4(0.94f, 0.98f, 0.995f, 1.0f));
+                    draw_compact_row("Калибровка pwr avg",
+                                     std::format("{:.2f} dBFS", vs.calibration_last.power_avg_dbfs),
+                                     ImVec4(0.94f, 0.98f, 0.995f, 1.0f));
+                    const double residual_phase_deg =
+                        theta_bias_to_phase_deg(vs.calibration_last.theta_circular_avg_deg, vs.center_freq_mhz, vs.baseline_m);
+                    if (ImGui::Button("Применить как фазовую поправку")) {
+                        vs.cal_phase_deg -= residual_phase_deg;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Сбросить отчёт")) {
+                        vs.calibration_last = {};
+                    }
+                    ImGui::TextColored(ImVec4(0.300f, 0.380f, 0.470f, 1.0f),
+                                       "Поправка к фазе: %+.3f°", -residual_phase_deg);
+                }
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Синхр.")) {
@@ -522,10 +672,11 @@ void render_viewer_ui(ViewerState& vs) {
     const float compass_radius = std::max(184.0f, std::min(stage_avail.x * 0.42f, compass_zone_h * 0.45f));
     const ImVec2 center(stage_origin.x + (stage_avail.x * 0.54f), stage_origin.y + (compass_zone_h * 0.52f));
     const bool missing_devices = vs.serials.size() < 2;
+    const char* inactive_label = fresh_raw_fix && !power_ok ? "Below Threshold" : "НЕТ ОЦЕНКИ";
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    xxrf_viewer::DrawThetaCompass(dl, center, compass_radius, theta_disp, fresh_fix ? vs.last.coherence : 0.0f,
-                                  fresh_fix, missing_devices);
+    xxrf_viewer::DrawThetaCompass(dl, center, compass_radius, theta_disp, display_fix ? vs.last_valid.coherence : 0.0f,
+                                  display_fix, missing_devices, 0.15f, inactive_label);
 
     ImGui::SetCursorScreenPos(ImVec2(stage_origin.x + 16.0f, stage_origin.y + 12.0f));
     begin_panel("stage_readout", ImVec2(214.0f, 104.0f), ImVec4(0.950f, 0.962f, 0.976f, 0.96f));
@@ -543,12 +694,19 @@ void render_viewer_ui(ViewerState& vs) {
     if (g_font_ui_large != nullptr) {
         ImGui::PopFont();
     }
+    if (g_font_ui_small != nullptr) {
+        ImGui::PushFont(g_font_ui_small);
+    }
+    ImGui::TextColored(ImVec4(0.300f, 0.380f, 0.470f, 1.0f), "мощность сигнала %s", signal_power_value.c_str());
+    if (g_font_ui_small != nullptr) {
+        ImGui::PopFont();
+    }
     end_panel();
 
     ImGui::SetCursorScreenPos(ImVec2(stage_origin.x, stage_origin.y + stage_avail.y - footer_h));
     const float tile_gap = 10.0f;
     const float tile_w = (ImGui::GetContentRegionAvail().x - tile_gap) * 0.5f;
-    draw_summary_tile("stage_age_tile", "Возраст оценки", sample_age_value, fresh_fix ? "Актуально" : "Ожидание",
+    draw_summary_tile("stage_age_tile", "Возраст оценки", sample_age_value, display_fix ? "Актуально" : "Ожидание",
                       ImVec2(tile_w, 84.0f));
     ImGui::SameLine(0.0f, tile_gap);
     draw_summary_tile("stage_sample_tile", "Последний отсчёт", sample_index_value, "Центральный отсчёт окна",
@@ -561,7 +719,7 @@ void render_viewer_ui(ViewerState& vs) {
     draw_section_title("Телеметрия");
     const float rail_inner_w = ImGui::GetContentRegionAvail().x;
     const float rail_gap = 10.0f;
-    const float rail_track_h = 104.0f;
+    const float rail_track_h = 182.0f;
     const float rail_health_h = vs.show_diagnostics ? 430.0f : 250.0f;
     const float rail_history_h = 220.0f;
     begin_panel("rail_track", ImVec2(rail_inner_w, rail_track_h), ImVec4(0.968f, 0.976f, 0.985f, 1.0f));
@@ -575,7 +733,8 @@ void render_viewer_ui(ViewerState& vs) {
     if (g_font_ui_large != nullptr) {
         ImGui::PushFont(g_font_ui_large);
     }
-    const float coherence_norm = std::clamp(fresh_fix ? static_cast<float>(vs.last.coherence) : 0.0f, 0.0f, 1.0f);
+    const float coherence_norm =
+        std::clamp(display_fix ? static_cast<float>(vs.last_valid.coherence) : 0.0f, 0.0f, 1.0f);
     const ImVec4 coherence_low(0.78f, 0.22f, 0.20f, 1.0f);
     const ImVec4 coherence_high(0.18f, 0.62f, 0.30f, 1.0f);
     const ImVec4 coherence_col(coherence_low.x + ((coherence_high.x - coherence_low.x) * coherence_norm),
@@ -585,6 +744,11 @@ void render_viewer_ui(ViewerState& vs) {
     if (g_font_ui_large != nullptr) {
         ImGui::PopFont();
     }
+    ImGui::Separator();
+    draw_compact_row("θ avg / окно", rolling_theta_avg, ImVec4(0.94f, 0.98f, 0.995f, 1.0f));
+    draw_compact_row("Размах θ / окно", rolling_theta_span, ImVec4(0.94f, 0.98f, 0.995f, 1.0f));
+    draw_compact_row("Coh avg / окно", rolling_coh_avg, ImVec4(0.94f, 0.98f, 0.995f, 1.0f));
+    draw_compact_row("Pwr avg / окно", rolling_power_avg, ImVec4(0.94f, 0.98f, 0.995f, 1.0f));
     end_panel();
 
     ImGui::Dummy(ImVec2(0.0f, rail_gap));

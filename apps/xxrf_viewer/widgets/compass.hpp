@@ -9,7 +9,8 @@
 namespace xxrf_viewer {
 
 inline void DrawThetaCompass(ImDrawList* dl, ImVec2 center, float radius, float theta_rad, float coherence,
-                             bool has_fix, bool highlight_missing_devices = false, float alpha_min = 0.15f) {
+                             bool has_fix, bool highlight_missing_devices = false, float alpha_min = 0.15f,
+                             const char* inactive_label = "НЕТ ОЦЕНКИ") {
     if (!dl)
         return;
 
@@ -67,7 +68,10 @@ inline void DrawThetaCompass(ImDrawList* dl, ImVec2 center, float radius, float 
 
     
     if (!has_fix) {
-        dl->AddText(ImVec2(center.x - radius * 0.37f, center.y - 6.0f), IM_COL32(255, 120, 120, 255), "НЕТ ОЦЕНКИ");
+        const char* label = (inactive_label != nullptr && inactive_label[0] != '\0') ? inactive_label : "НЕТ ОЦЕНКИ";
+        const ImVec2 text_size = ImGui::CalcTextSize(label);
+        dl->AddText(ImVec2(center.x - (text_size.x * 0.5f), center.y - (text_size.y * 0.5f)),
+                    IM_COL32(255, 120, 120, 255), label);
         return;
     }
 

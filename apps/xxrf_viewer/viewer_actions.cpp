@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <ctime>
+#include <numbers>
 
 std::uint64_t now_monotonic_ns() noexcept {
     timespec ts{};
@@ -26,6 +28,50 @@ std::vector<std::string> enumerate_hackrf_serials() {
     return out;
 }
 
+static void clear_measurement_state(ViewerState& vs) noexcept {
+    vs.has_fix = false;
+    vs.last = {};
+    vs.has_valid_fix = false;
+    vs.last_valid = {};
+    vs.smooth_init = false;
+    vs.sx = 0.0f;
+    vs.sy = 1.0f;
+    vs.last_t_ns = 0;
+    vs.emitted_estimates = 0;
+    vs.signal_gate_open = false;
+    vs.rolling_samples.clear();
+    vs.theta_head = 0;
+    vs.theta_count = 0;
+    vs.coherence_head = 0;
+    vs.coherence_count = 0;
+    vs.power_head = 0;
+    vs.power_count = 0;
+    vs.calibration_last = {};
+    if (vs.calibration_running) {
+        vs.calibration_running = false;
+        vs.calibration_acc.reset();
+    }
+}
+
+static float signal_power_to_dbfs(double mean_p0, double mean_p1) noexcept {
+    const double limiting_channel_power = std::max(1e-12, std::min(mean_p0, mean_p1));
+    return static_cast<float>(10.0 * std::log10(limiting_channel_power));
+}
+
+double theta_bias_to_phase_deg(double theta_deg, double center_freq_mhz, double baseline_m) noexcept {
+    if (!(center_freq_mhz > 0.0) || !(baseline_m > 0.0)) {
+        return 0.0;
+    }
+    constexpr double c = 299'792'458.0;
+    const double lambda = c / (center_freq_mhz * 1e6);
+    if (!(lambda > 0.0)) {
+        return 0.0;
+    }
+    const double phase_rad = (2.0 * std::numbers::pi * baseline_m / lambda) *
+                             std::sin(theta_deg * (std::numbers::pi / 180.0));
+    return phase_rad * (180.0 / std::numbers::pi);
+}
+
 static xxrf::core::Result<xxrf::aoa::Processor> make_processor(const ViewerState& s) noexcept {
     xxrf::aoa::Config cfg;
     cfg.method = xxrf::aoa::Method::PhaseInterferometry;
@@ -41,13 +87,14 @@ static xxrf::core::Result<xxrf::aoa::Processor> make_processor(const ViewerState
     cfg.win.sample_stride = static_cast<std::size_t>(std::max(1, s.sample_stride));
 
     cfg.min_coherence = s.min_coherence;
-    cfg.clamp_sin = true;
+    cfg.clamp_sin = false;
     cfg.require_contiguous = false;
     cfg.apply_calibration = true;
     cfg.emit_below_quality = true;
 
     xxrf::aoa::Calibration cal{};
-    cal.ch1_gain = {1.0F, 0.0F};
+    const float cal_phase_rad = static_cast<float>(s.cal_phase_deg * (std::numbers::pi / 180.0));
+    cal.ch1_gain = {std::cos(cal_phase_rad), std::sin(cal_phase_rad)};
 
     return xxrf::aoa::Processor::create(cfg, cal);
 }
@@ -98,14 +145,8 @@ xxrf::core::Result<xxrf::aoa::rt::Stream> start_stream(ViewerState& vs) noexcept
     opt.dual.settings.amp_enable = vs.amp_enable;
 
     vs.q.reset();
-    vs.has_fix = false;
-    vs.smooth_init = false;
-    vs.emitted_estimates = 0;
+    clear_measurement_state(vs);
     vs.last_error.clear();
-    vs.theta_head = 0;
-    vs.theta_count = 0;
-    vs.coherence_head = 0;
-    vs.coherence_count = 0;
 
     auto sr = xxrf::aoa::rt::Stream::start(
         did_out, did_in, std::move(proc),
@@ -115,6 +156,7 @@ xxrf::core::Result<xxrf::aoa::rt::Stream> start_stream(ViewerState& vs) noexcept
             s.sample_index = e.sample_index;
             s.theta_rad = static_cast<float>(e.theta_rad);
             s.coherence = static_cast<float>(e.quality.coherence);
+            s.signal_power_dbfs = signal_power_to_dbfs(e.quality.mean_p0, e.quality.mean_p1);
             vs.q.push_drop_oldest(s);
         },
         opt);
@@ -128,6 +170,7 @@ xxrf::core::Result<xxrf::aoa::rt::Stream> start_stream(ViewerState& vs) noexcept
 
 void stop_stream(ViewerState& vs) noexcept {
     if (!vs.stream) {
+        clear_measurement_state(vs);
         return;
     }
     if (auto st = vs.stream->stop(); !st) {
@@ -136,4 +179,6 @@ void stop_stream(ViewerState& vs) noexcept {
         vs.last_error.clear();
     }
     vs.stream.reset();
+    vs.q.reset();
+    clear_measurement_state(vs);
 }

@@ -8,6 +8,7 @@
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
 #include <cmath>
+#include <deque>
 #include <imgui.h>
 #include <numbers>
 #include <print>
@@ -57,14 +58,58 @@ int main() {
     while (glfwWindowShouldClose(window) == 0) {
         glfwPollEvents();
 
+        const std::uint64_t frame_now_ns = now_monotonic_ns();
         xxrf_viewer::AoASample s;
         while (vs.q.pop(s)) {
             vs.last = s;
             vs.has_fix = true;
             vs.emitted_estimates++;
+            push_history_sample(vs.power_history, vs.power_head, vs.power_count, s.signal_power_dbfs);
+
+            const bool gate_was_open = vs.signal_gate_open;
+            const float gate_on_dbfs = vs.signal_threshold_dbfs;
+            const float gate_off_dbfs = vs.signal_threshold_dbfs - std::max(0.1f, vs.signal_threshold_hysteresis_db);
+            if (vs.signal_gate_open) {
+                vs.signal_gate_open = s.signal_power_dbfs >= gate_off_dbfs;
+            } else {
+                vs.signal_gate_open = s.signal_power_dbfs >= gate_on_dbfs;
+            }
+
+            const bool power_ok = vs.signal_gate_open;
+            const std::uint64_t window_ns =
+                static_cast<std::uint64_t>(std::max(0.5, vs.rolling_window_s) * 1'000'000'000.0);
+            while (!vs.rolling_samples.empty() && (s.t_ns - vs.rolling_samples.front().t_ns) > window_ns) {
+                vs.rolling_samples.pop_front();
+            }
+
+            if (!power_ok) {
+                if (gate_was_open) {
+                    vs.smooth_init = false;
+                }
+                continue;
+            }
+
+            if (!gate_was_open) {
+                vs.smooth_init = false;
+            }
+
+            vs.last_valid = s;
+            vs.has_valid_fix = true;
             push_history_sample(vs.theta_history, vs.theta_head, vs.theta_count,
                                 s.theta_rad * (180.0F / std::numbers::pi_v<float>));
             push_history_sample(vs.coherence_history, vs.coherence_head, vs.coherence_count, s.coherence);
+
+            LiveWindowSample ws;
+            ws.t_ns = s.t_ns;
+            ws.sample_index = s.sample_index;
+            ws.theta_deg = s.theta_rad * (180.0F / std::numbers::pi_v<float>);
+            ws.coherence = s.coherence;
+            ws.power_dbfs = s.signal_power_dbfs;
+            vs.rolling_samples.push_back(ws);
+
+            if (vs.calibration_running) {
+                vs.calibration_acc.add(s);
+            }
 
             const float nx = std::sin(s.theta_rad);
             const float ny = std::cos(s.theta_rad);
@@ -92,6 +137,16 @@ int main() {
                     vs.sx = nx;
                     vs.sy = ny;
                 }
+            }
+        }
+
+        if (vs.calibration_running) {
+            const std::uint64_t calib_duration_ns =
+                static_cast<std::uint64_t>(std::max(1.0, vs.calibration_duration_s) * 1'000'000'000.0);
+            if (frame_now_ns >= (vs.calibration_started_ns + calib_duration_ns)) {
+                vs.calibration_last = vs.calibration_acc.summary();
+                vs.calibration_running = false;
+                vs.calibration_acc.reset();
             }
         }
 
