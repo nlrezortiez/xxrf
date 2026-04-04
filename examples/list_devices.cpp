@@ -2,12 +2,6 @@
 #include <xxrf/xxrf.hpp>
 
 int main() {
-    auto ctx = xxrf::core::Context::create();
-    if (!ctx) {
-        std::println(stderr, "Context init failed: {}", ctx.error().message);
-        return EXIT_FAILURE;
-    }
-
     auto list = xxrf::core::DeviceList::enumerate();
     if (!list) {
         std::println(stderr, "Enumerate failed: {}", list.error().message);

@@ -24,12 +24,6 @@ static inline double mean_abs_iq(std::span<const std::int8_t> iq) {
 }
 
 int main() {
-    auto ctx = xxrf::core::Context::create();
-    if (!ctx) {
-        std::println(stderr, "Context::create failed: {}", ctx.error().message);
-        return EXIT_FAILURE;
-    }
-
     auto devr = xxrf::core::Device::open_first();
     if (!devr) {
         std::println(stderr, "Device::open_first failed: {}", devr.error().message);
@@ -37,9 +31,8 @@ int main() {
     }
     auto dev = std::move(*devr);
 
-    // Настройки под тест
-    const double sample_rate = 10'000'000.0;   // 10 Msps
-    const std::uint64_t freq = 100'000'000ULL; // 100 MHz
+    const double sample_rate = 10'000'000.0;
+    const std::uint64_t freq = 100'000'000ULL;
 
     if (auto r = dev.set_sample_rate(sample_rate); !r) {
         std::println(stderr, "set_sample_rate failed: {}", r.error().message);
@@ -54,7 +47,6 @@ int main() {
     dev.set_vga_gain(16);
     dev.set_amp_enable(false);
 
-    // Наблюдения со стороны handler'а
     std::atomic<std::uint64_t> blocks_seen{0};
     std::atomic<std::uint64_t> samples_seen{0};
     std::atomic<double> last_mean_abs{0.0};
@@ -67,7 +59,6 @@ int main() {
             blocks_seen.fetch_add(1, std::memory_order_relaxed);
             samples_seen.fetch_add(blk.iq_interleaved.size() / 2, std::memory_order_relaxed);
 
-            // Лёгкий sanity
             last_mean_abs.store(mean_abs_iq(blk.iq_interleaved), std::memory_order_relaxed);
         },
         opt);
@@ -89,7 +80,6 @@ int main() {
 
     const auto st = stream.stats();
 
-    // derived throughput
     const double bytes_per_s = (dt > 0) ? (double(st.bytes_received) / dt) : 0.0;
     const double mb_per_s = bytes_per_s / 1e6;
     const double complex_samples_per_s = (dt > 0) ? (double(st.bytes_received) / 2.0 / dt) : 0.0;

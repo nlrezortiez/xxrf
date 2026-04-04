@@ -1,8 +1,8 @@
 #include <atomic>
 #include <chrono>
-#include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <numbers>
 #include <print>
 #include <string_view>
 #include <thread>
@@ -11,7 +11,6 @@
 using namespace std::chrono_literals;
 
 static bool parse_u64(std::string_view s, std::uint64_t& out) noexcept {
-    // Accept decimal or "100e6"-like? For now: decimal only.
     std::uint64_t v = 0;
     const auto* p = s.data();
     const auto* e = s.data() + s.size();
@@ -30,8 +29,6 @@ static bool parse_u64(std::string_view s, std::uint64_t& out) noexcept {
 }
 
 static bool parse_double(std::string_view s, double& out) noexcept {
-    // Minimal robust parse without exceptions.
-    // Uses strtod; accepts "0.15", "1e-3", etc.
     std::string tmp{s};
     char* end = nullptr;
     const double v = std::strtod(tmp.c_str(), &end);
@@ -91,37 +88,26 @@ int main(int argc, char** argv) {
         }
     }
 
-    auto ctxr = xxrf::core::Context::create();
-    if (!ctxr) {
-        std::print("Context::create failed: {}\n", ctxr.error().message);
-        return EXIT_FAILURE;
-    }
-    auto& ctx = *ctxr;
-
-    // AoA config (MVP: phase interferometry)
     xxrf::aoa::Config cfg;
     cfg.method = xxrf::aoa::Method::PhaseInterferometry;
     cfg.sample_rate_hz = fs_hz;
     cfg.center_freq_hz = f0_hz;
 
     cfg.geom.baseline_m = baseline_m;
-    cfg.geom.baseline_azimuth_rad = 0.0; // keep 0 for smoke test
+    cfg.geom.baseline_azimuth_rad = 0.0;
 
-    // CPU control: stride reduces per-sample work.
     cfg.win.sample_stride = 32;
     cfg.win.window_samples = 8192;
     cfg.win.hop_samples = 2048;
 
-    // For smoke test you typically want to see output even in poor RF conditions.
-    // Raise this later (e.g. 0.6..0.9) when you have a clean narrowband source.
     cfg.min_coherence = 0.10;
 
     cfg.clamp_sin = true;
-    cfg.require_contiguous = true;
+    cfg.require_contiguous = false;
     cfg.apply_calibration = true;
 
     xxrf::aoa::Calibration cal{};
-    cal.ch1_gain = {1.0F, 0.0F}; // TODO: set from calibration tool later.
+    cal.ch1_gain = {1.0F, 0.0F};
 
     auto procr = xxrf::aoa::Processor::create(cfg, cal);
     if (!procr) {
@@ -130,7 +116,6 @@ int main(int argc, char** argv) {
     }
     auto proc = std::move(*procr);
 
-    // DualRx device identities
     xxrf::sync::DualRxDeviceId did_out;
     did_out.serial = std::string(serial_out);
     did_out.role = xxrf::sync::TriggerRole::TriggerOut;
@@ -139,26 +124,21 @@ int main(int argc, char** argv) {
     did_in.serial = std::string(serial_in);
     did_in.role = xxrf::sync::TriggerRole::TriggerInWait;
 
-    // AoA Stream options (DualRx inside)
     xxrf::aoa::rt::StreamOptions sopt{};
-    sopt.require_zero_skew = true;
+    sopt.require_zero_skew = false;
 
-    // DualRx pairing and queueing (safe defaults for smoke)
     sopt.dual.pairing = xxrf::sync::PairingMode::BySampleIndex;
     sopt.dual.max_skew_samples = 4096;
     sopt.dual.staging_queue_blocks = 32;
 
-    // RxStream options
     sopt.dual.stream.ring_blocks = 64;
     sopt.dual.stream.block_bytes = 262144;
 
-    // Sync policy (hardware trigger + clkout/clkin)
     sopt.dual.sync.enable_hardware_trigger = true;
     sopt.dual.sync.enable_clkout_on_trigger_out = true;
     sopt.dual.sync.require_clkin_on_trigger_in = true;
     sopt.dual.sync.arm_delay = 50ms;
 
-    // Aggregates updated from handler (no printing in handler)
     std::atomic<std::uint64_t> est_count{0};
     std::atomic<double> last_theta_rad{0.0};
     std::atomic<double> last_az_rad{0.0};
@@ -166,10 +146,8 @@ int main(int argc, char** argv) {
     std::atomic<std::uint64_t> last_si{0};
 
     auto streamr = xxrf::aoa::rt::Stream::start(
-        ctx, did_out, did_in, std::move(proc),
+        did_out, did_in, std::move(proc),
         [&](const xxrf::aoa::Estimate& e) {
-            // This is called in DualRx coordinator thread.
-            // Do not block. Just atomics.
             est_count.fetch_add(1, std::memory_order_relaxed);
             last_theta_rad.store(e.theta_rad, std::memory_order_relaxed);
             last_az_rad.store(e.azimuth_rad, std::memory_order_relaxed);
@@ -207,7 +185,7 @@ int main(int argc, char** argv) {
         const auto si = last_si.load(std::memory_order_relaxed);
 
         std::print("[t={}s] estimates={}  last: theta={:+.3f} deg  az={:+.3f} deg  coh={:.3f}  sample_index={}\n", dt,
-                   n, th * (180.0 / M_PI), az * (180.0 / M_PI), coh, si);
+                   n, th * (180.0 / std::numbers::pi), az * (180.0 / std::numbers::pi), coh, si);
 
         if (dt >= seconds) {
             break;

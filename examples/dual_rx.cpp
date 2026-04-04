@@ -14,19 +14,17 @@
 static inline void atomic_min_u64(std::atomic<std::uint64_t>& dst, std::uint64_t v) noexcept {
     std::uint64_t cur = dst.load(std::memory_order_relaxed);
     while (v < cur && !dst.compare_exchange_weak(cur, v, std::memory_order_relaxed)) {
-        // cur updated
     }
 }
 
 static inline void atomic_max_u64(std::atomic<std::uint64_t>& dst, std::uint64_t v) noexcept {
     std::uint64_t cur = dst.load(std::memory_order_relaxed);
     while (v > cur && !dst.compare_exchange_weak(cur, v, std::memory_order_relaxed)) {
-        // cur updated
     }
 }
 
 static inline double mean_abs_iq_quick(std::span<const std::int8_t> iq) noexcept {
-    // лёгкая sanity-метрика: средний модуль по подвыборке
+
     if (iq.size() < 2) {
         return 0.0;
     }
@@ -38,7 +36,7 @@ static inline double mean_abs_iq_quick(std::span<const std::int8_t> iq) noexcept
     for (std::size_t k = 0; k < take; ++k) {
         const int i = iq[(2 * k) + 0];
         const int q = iq[(2 * k) + 1];
-        // без sqrt, достаточно L1 для sanity (быстрее)
+
         acc += double(std::abs(i) + std::abs(q));
     }
     return acc / double(take);
@@ -63,13 +61,6 @@ int main(int argc, char** argv) {
         seconds = std::max(1, std::atoi(argv[3]));
     }
 
-    auto ctx = xxrf::core::Context::create();
-    if (!ctx) {
-        std::print("Context::create failed: {}\n", ctx.error().message);
-        return EXIT_FAILURE;
-    }
-
-    // Пользовательская статистика по парам
     std::atomic<std::uint64_t> pairs_seen{0};
     std::atomic<std::uint64_t> first_sample_min{std::numeric_limits<std::uint64_t>::max()};
     std::atomic<std::uint64_t> first_sample_max{0};
@@ -81,7 +72,6 @@ int main(int argc, char** argv) {
     std::atomic<double> last_mean_out{0.0};
     std::atomic<double> last_mean_in{0.0};
 
-    // Конфиг DualRx
     xxrf::sync::DualRxOptions opt{};
     opt.settings.apply_common_settings = true;
     opt.settings.sample_rate_hz = 10'000'000.0;
@@ -101,13 +91,11 @@ int main(int argc, char** argv) {
 
     opt.staging_queue_blocks = 32;
 
-    // Для smoke-теста лучше разрешить небольшой skew, чтобы увидеть его величину,
-    // а не “в ноль пар” при постоянном оффсете.
     opt.pairing = xxrf::sync::PairingMode::BySampleIndex;
-    opt.max_skew_samples = 0; // для строгого режима можно поставить 0
+    opt.max_skew_samples = 0;
 
     auto dualr = xxrf::sync::DualRx::start(
-        *ctx, xxrf::sync::DualRxDeviceId{.serial = serial_out, .role = xxrf::sync::TriggerRole::TriggerOut},
+        xxrf::sync::DualRxDeviceId{.serial = serial_out, .role = xxrf::sync::TriggerRole::TriggerOut},
         xxrf::sync::DualRxDeviceId{.serial = serial_in, .role = xxrf::sync::TriggerRole::TriggerInWait},
         [&](const xxrf::sync::DualRxBlockView& blk) {
             pairs_seen.fetch_add(1, std::memory_order_relaxed);

@@ -19,7 +19,8 @@ int main() {
     }
 
     if (dev.error().code == -1) {
-        std::println(stderr, "Device::open_by_serial returned synthesized null-handle error instead of libhackrf error");
+        std::println(stderr,
+                     "Device::open_by_serial returned synthesized null-handle error instead of libhackrf error");
         return EXIT_FAILURE;
     }
 

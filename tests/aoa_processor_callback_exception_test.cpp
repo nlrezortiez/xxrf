@@ -1,5 +1,4 @@
 #include <cstdlib>
-#include <exception>
 #include <print>
 #include <stdexcept>
 #include <vector>
@@ -25,23 +24,19 @@ int main() {
     auto proc = std::move(*procr);
 
     const std::vector<std::int8_t> iq = {
-        64, 0,
-        64, 0,
-        64, 0,
-        64, 0,
+        64, 0, 64, 0, 64, 0, 64, 0,
     };
 
     bool threw = false;
     try {
-        proc.push(xxrf::aoa::InputFrameView{
-                      .first_sample_index = 0,
-                      .iq0_i8q8 = iq,
-                      .iq1_i8q8 = iq,
-                      .skew_samples = 0,
-                  },
-                  [&](const xxrf::aoa::Estimate&) {
-                      throw std::runtime_error("expected regression exception");
-                  });
+        proc.push(
+            xxrf::aoa::InputFrameView{
+                .first_sample_index = 0,
+                .iq0_i8q8 = iq,
+                .iq1_i8q8 = iq,
+                .skew_samples = 0,
+            },
+            [&](const xxrf::aoa::Estimate&) { throw std::runtime_error("expected regression exception"); });
     } catch (const std::runtime_error&) {
         threw = true;
     }

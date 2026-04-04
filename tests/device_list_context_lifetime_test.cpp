@@ -1,6 +1,5 @@
 #include <cstdlib>
 #include <print>
-#include <utility>
 #include <xxrf/core/context.hpp>
 #include <xxrf/core/device_list.hpp>
 
