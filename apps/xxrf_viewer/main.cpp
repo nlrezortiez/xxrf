@@ -68,7 +68,7 @@ int main() {
 
             const bool gate_was_open = vs.signal_gate_open;
             const float gate_on_dbfs = vs.signal_threshold_dbfs;
-            const float gate_off_dbfs = vs.signal_threshold_dbfs - std::max(0.1f, vs.signal_threshold_hysteresis_db);
+            const float gate_off_dbfs = vs.signal_threshold_dbfs - std::max(0.1F, vs.signal_threshold_hysteresis_db);
             if (vs.signal_gate_open) {
                 vs.signal_gate_open = s.signal_power_dbfs >= gate_off_dbfs;
             } else {

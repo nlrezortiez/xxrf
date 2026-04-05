@@ -30,6 +30,7 @@ target_link_libraries(xxrf_imgui PUBLIC glfw OpenGL::GL GLEW::GLEW)
 
 
 target_link_libraries(xxrf_viewer PRIVATE xxrf::aoa xxrf_imgui)
+target_compile_definitions(xxrf_viewer PRIVATE XXRF_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
 
 xxrf_apply_common(xxrf_viewer)

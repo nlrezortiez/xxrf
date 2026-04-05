@@ -33,6 +33,14 @@ function(xxrf_apply_common target)
     endif()
   endif()
 
+  if (MINGW AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    if (_type STREQUAL "INTERFACE_LIBRARY")
+      target_link_libraries(${target} INTERFACE stdc++exp)
+    else()
+      target_link_libraries(${target} PUBLIC stdc++exp)
+    endif()
+  endif()
+
   if (XXRF_ENABLE_WERROR)
     if (_type STREQUAL "INTERFACE_LIBRARY")
       target_compile_options(${target} INTERFACE -Werror)
@@ -182,4 +190,3 @@ target_link_libraries(xxrf INTERFACE
 )
 
 xxrf_apply_common(xxrf)
-

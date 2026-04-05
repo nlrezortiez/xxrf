@@ -15,6 +15,7 @@ foreach(src ${TEST_SOURCES})
 
   add_executable(${tgt} ${src})
   target_link_libraries(${tgt} PRIVATE xxrf::xxrf)
+  xxrf_apply_common(${tgt})
 
   add_test(NAME ${tgt} COMMAND ${tgt})
 endforeach()

@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <deque>
+#include <filesystem>
 #include <format>
 #include <imgui.h>
 #include <numbers>
@@ -18,6 +19,23 @@ namespace {
 ImFont* g_font_ui = nullptr;
 ImFont* g_font_ui_large = nullptr;
 ImFont* g_font_ui_small = nullptr;
+
+std::string find_font_path(const char* filename) {
+    namespace fs = std::filesystem;
+
+    const std::array<fs::path, 3> candidates = {
+        fs::path(XXRF_SOURCE_DIR) / "assets" / filename,
+        fs::current_path() / "assets" / filename,
+        fs::current_path().parent_path() / "assets" / filename,
+    };
+
+    for (const auto& path : candidates) {
+        if (fs::exists(path)) {
+            return path.string();
+        }
+    }
+    return {};
+}
 
 void begin_panel(const char* id, const ImVec2& size, const ImVec4& bg) {
     ImGui::PushStyleColor(ImGuiCol_ChildBg, bg);
@@ -198,17 +216,21 @@ MeasurementSummary compute_window_summary(const std::deque<LiveWindowSample>& sa
 
 void load_viewer_fonts() {
     ImGuiIO& io = ImGui::GetIO();
-    const char* regular = "/usr/share/fonts/TTF/JetBrainsMonoNerdFontPropo-Regular.ttf";
-    const char* semibold = "/usr/share/fonts/TTF/JetBrainsMonoNerdFontPropo-SemiBold.ttf";
+    const std::string regular = find_font_path("JetBrainsMonoNerdFontPropo-Regular.ttf");
+    const std::string semibold = find_font_path("JetBrainsMonoNerdFontPropo-SemiBold.ttf");
 
     ImFontConfig cfg;
     cfg.OversampleH = 2;
     cfg.OversampleV = 2;
     cfg.PixelSnapH = false;
 
-    g_font_ui = io.Fonts->AddFontFromFileTTF(regular, 16.0f, &cfg);
-    g_font_ui_large = io.Fonts->AddFontFromFileTTF(semibold, 22.0f, &cfg);
-    g_font_ui_small = io.Fonts->AddFontFromFileTTF(regular, 12.5f, &cfg);
+    if (!regular.empty()) {
+        g_font_ui = io.Fonts->AddFontFromFileTTF(regular.c_str(), 16.0f, &cfg);
+        g_font_ui_small = io.Fonts->AddFontFromFileTTF(regular.c_str(), 12.5f, &cfg);
+    }
+    if (!semibold.empty()) {
+        g_font_ui_large = io.Fonts->AddFontFromFileTTF(semibold.c_str(), 22.0f, &cfg);
+    }
 
     if (g_font_ui == nullptr) {
         g_font_ui = io.Fonts->AddFontDefault();
