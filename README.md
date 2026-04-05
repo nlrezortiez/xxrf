@@ -192,7 +192,7 @@ $$
 межканальная фазовая разность оценивается как
 
 $$
-\Delta \varphi = \operatorname{atan2}\bigl(\operatorname{Im}(Z), \operatorname{Re}(Z)\bigr).
+\Delta \varphi = \mathrm{atan2}\bigl(\mathrm{Im}(Z), \mathrm{Re}(Z)\bigr).
 $$
 
 Далее эта величина преобразуется в угол, и одновременно вычисляются показатели качества.
