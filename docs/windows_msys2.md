@@ -120,14 +120,51 @@ AoA probe:
 ./build/ucrt64/examples/xxrf_example_list_devices.exe
 ```
 
-## 10. Что уже учтено в проекте для MSYS2
+## 10. Собрать portable bundle для передачи другому пользователю
+
+
+Для этого в проекте есть два специальных таргета.
+
+### Собрать portable-папку
+
+```bash
+cmake -S . -B build/ucrt64-release -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build/ucrt64-release -j --target xxrf_bundle_viewer
+```
+
+После этого появится директория:
+
+```text
+build/ucrt64-release/dist/xxrf_viewer-win64
+```
+
+Внутри неё будут:
+
+- `xxrf_viewer.exe`
+- runtime DLL, которые требуются именно этой сборке
+- `assets/`
+- `README`
+
+### Собрать zip-архив
+
+```bash
+cmake --build build/ucrt64-release -j --target xxrf_bundle_viewer_zip
+```
+
+После этого появится файл:
+
+```text
+build/ucrt64-release/dist/xxrf_viewer-win64.zip
+```
+
+## 11. Что уже учтено в проекте для MSYS2
 
 В текущем коде уже зафиксированы две важные вещи для `ucrt64`:
 
 - `stdc++exp` линкуется централизованно через общий CMake-хук для `MinGW + GNU`, поэтому `std::print` больше не нужно прописывать вручную по таргетам.
 - Viewer больше не использует Linux-only путь вида `/usr/share/fonts/...`; шрифты берутся из локальной папки `assets`.
 
-## 11. Типичные проблемы
+## 12. Типичные проблемы
 
 ### `find_package(glfw3)` или `find_package(GLEW)` не находит библиотеки
 
@@ -162,7 +199,7 @@ cmake -S . -B build/ucrt64 -G Ninja
 - `assets/JetBrainsMonoNerdFontPropo-Regular.ttf`
 - `assets/JetBrainsMonoNerdFontPropo-SemiBold.ttf`
 
-## 12. Работа с HackRF под Windows
+## 13. Работа с HackRF под Windows
 
 Сборка проекта и работа с устройством — это разные слои.
 
@@ -173,7 +210,7 @@ cmake -S . -B build/ucrt64 -G Ninja
 
 Если viewer собирается, но не видит устройства, проблема обычно уже не в CMake и не в коде, а в драйвере/USB-стеке Windows.
 
-## 13. Рекомендуемый сценарий
+## 14. Рекомендуемый сценарий
 
 Для чистого повторяемого билда:
 
