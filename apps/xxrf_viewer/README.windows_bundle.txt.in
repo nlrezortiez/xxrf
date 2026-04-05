@@ -1,0 +1,25 @@
+XXRF Viewer Portable Bundle
+===========================
+
+Contents
+--------
+- xxrf_viewer.exe
+- runtime DLL dependencies copied from the current MSYS2/UCRT64 toolchain
+- assets/ with viewer fonts
+
+Notes
+-----
+- This bundle is expected to be run on Windows x86_64.
+- If HackRF devices are not detected, the usual cause is the Windows USB driver setup rather than the application bundle itself.
+- The viewer expects the assets directory to stay next to the executable.
+
+Tested layout
+-------------
+xxrf_viewer-win64/
+  xxrf_viewer.exe
+  *.dll
+  assets/
+
+Build origin
+------------
+Generated from the xxrf CMake target `xxrf_bundle_viewer`.
