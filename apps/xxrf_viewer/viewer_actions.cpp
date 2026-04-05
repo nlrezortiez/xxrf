@@ -67,8 +67,8 @@ double theta_bias_to_phase_deg(double theta_deg, double center_freq_mhz, double 
     if (!(lambda > 0.0)) {
         return 0.0;
     }
-    const double phase_rad = (2.0 * std::numbers::pi * baseline_m / lambda) *
-                             std::sin(theta_deg * (std::numbers::pi / 180.0));
+    const double phase_rad =
+        (2.0 * std::numbers::pi * baseline_m / lambda) * std::sin(theta_deg * (std::numbers::pi / 180.0));
     return phase_rad * (180.0 / std::numbers::pi);
 }
 
@@ -87,6 +87,10 @@ static xxrf::core::Result<xxrf::aoa::Processor> make_processor(const ViewerState
     cfg.win.sample_stride = static_cast<std::size_t>(std::max(1, s.sample_stride));
 
     cfg.min_coherence = s.min_coherence;
+    cfg.signal_threshold_dbfs = s.signal_threshold_dbfs;
+    cfg.min_active_fraction = s.min_active_fraction;
+    cfg.phase_stability_subwindows = static_cast<std::size_t>(std::max(1, s.phase_stability_subwindows));
+    cfg.max_phase_std_deg = s.max_phase_std_deg;
     cfg.clamp_sin = false;
     cfg.require_contiguous = false;
     cfg.apply_calibration = true;
@@ -157,6 +161,9 @@ xxrf::core::Result<xxrf::aoa::rt::Stream> start_stream(ViewerState& vs) noexcept
             s.theta_rad = static_cast<float>(e.theta_rad);
             s.coherence = static_cast<float>(e.quality.coherence);
             s.signal_power_dbfs = signal_power_to_dbfs(e.quality.mean_p0, e.quality.mean_p1);
+            s.active_fraction = static_cast<float>(e.quality.active_fraction);
+            s.phase_std_deg = static_cast<float>(e.quality.phase_std_deg);
+            s.quality_ok = e.quality.ok;
             vs.q.push_drop_oldest(s);
         },
         opt);

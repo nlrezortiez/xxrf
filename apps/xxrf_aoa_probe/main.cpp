@@ -1,5 +1,3 @@
-#include <xxrf/xxrf.hpp>
-
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -15,6 +13,7 @@
 #include <string_view>
 #include <thread>
 #include <vector>
+#include <xxrf/xxrf.hpp>
 
 namespace {
 
@@ -29,6 +28,10 @@ struct Options final {
     int sample_stride = 32;
 
     double min_coherence = 0.20;
+    double signal_threshold_dbfs = -55.0;
+    double min_active_fraction = 0.15;
+    int phase_stability_subwindows = 4;
+    double max_phase_std_deg = 20.0;
     double cal_phase_deg = 5.514;
     int lna_gain = 16;
     int vga_gain = 16;
@@ -66,29 +69,32 @@ struct Aggregate final {
 };
 
 void print_usage(const char* argv0) {
-    std::cout
-        << "Usage: " << argv0 << " [options]\n\n"
-        << "Options:\n"
-        << "  --duration-sec N       Measurement duration in seconds (default: 15)\n"
-        << "  --freq-mhz F           Center frequency in MHz (default: 433.92)\n"
-        << "  --sample-rate-msps R   Sample rate in Msps (default: 5.0)\n"
-        << "  --baseline-m D         Antenna baseline in meters (default: 0.15)\n"
-        << "  --window N             AoA window samples (default: 8192)\n"
-        << "  --hop N                AoA hop samples (default: 2048)\n"
-        << "  --stride N             AoA sample stride (default: 32)\n"
-        << "  --min-coherence C      Minimum coherence (default: 0.20)\n"
-        << "  --cal-phase-deg P      Phase correction applied to channel 1 (default: 5.514)\n"
-        << "  --lna-db N             LNA gain in dB (default: 16)\n"
-        << "  --vga-db N             VGA gain in dB (default: 16)\n"
-        << "  --amp                  Enable RX amp\n"
-        << "  --no-hw-trigger        Disable hardware trigger\n"
-        << "  --no-clkout            Disable CLKOUT on trigger-out device\n"
-        << "  --no-require-clkin     Do not require CLKIN on trigger-in device\n"
-        << "  --arm-delay-ms N       Arm delay in milliseconds (default: 50)\n"
-        << "  --out-serial SERIAL    Trigger-out device serial\n"
-        << "  --in-serial SERIAL     Trigger-in device serial\n"
-        << "  --list-devices         Print detected HackRF serials and exit\n"
-        << "  --help                 Show this help\n";
+    std::cout << "Usage: " << argv0 << " [options]\n\n"
+              << "Options:\n"
+              << "  --duration-sec N       Measurement duration in seconds (default: 15)\n"
+              << "  --freq-mhz F           Center frequency in MHz (default: 433.92)\n"
+              << "  --sample-rate-msps R   Sample rate in Msps (default: 5.0)\n"
+              << "  --baseline-m D         Antenna baseline in meters (default: 0.15)\n"
+              << "  --window N             AoA window samples (default: 8192)\n"
+              << "  --hop N                AoA hop samples (default: 2048)\n"
+              << "  --stride N             AoA sample stride (default: 32)\n"
+              << "  --min-coherence C      Minimum coherence (default: 0.20)\n"
+              << "  --signal-threshold-dbfs D  Signal threshold in dBFS for active-window detection (default: -55)\n"
+              << "  --min-active-fraction F    Minimum active fraction in window (default: 0.15)\n"
+              << "  --phase-subwindows N       Phase stability subwindows (default: 4)\n"
+              << "  --max-phase-std-deg D      Maximum phase std-dev in degrees (default: 20)\n"
+              << "  --cal-phase-deg P      Phase correction applied to channel 1 (default: 5.514)\n"
+              << "  --lna-db N             LNA gain in dB (default: 16)\n"
+              << "  --vga-db N             VGA gain in dB (default: 16)\n"
+              << "  --amp                  Enable RX amp\n"
+              << "  --no-hw-trigger        Disable hardware trigger\n"
+              << "  --no-clkout            Disable CLKOUT on trigger-out device\n"
+              << "  --no-require-clkin     Do not require CLKIN on trigger-in device\n"
+              << "  --arm-delay-ms N       Arm delay in milliseconds (default: 50)\n"
+              << "  --out-serial SERIAL    Trigger-out device serial\n"
+              << "  --in-serial SERIAL     Trigger-in device serial\n"
+              << "  --list-devices         Print detected HackRF serials and exit\n"
+              << "  --help                 Show this help\n";
 }
 
 bool parse_int(std::string_view s, int& out) {
@@ -140,6 +146,10 @@ xxrf::core::Result<xxrf::aoa::Processor> make_processor(const Options& opt) {
     cfg.win.hop_samples = static_cast<std::size_t>(std::max(1, opt.hop_samples));
     cfg.win.sample_stride = static_cast<std::size_t>(std::max(1, opt.sample_stride));
     cfg.min_coherence = opt.min_coherence;
+    cfg.signal_threshold_dbfs = opt.signal_threshold_dbfs;
+    cfg.min_active_fraction = opt.min_active_fraction;
+    cfg.phase_stability_subwindows = static_cast<std::size_t>(std::max(1, opt.phase_stability_subwindows));
+    cfg.max_phase_std_deg = opt.max_phase_std_deg;
     cfg.clamp_sin = false;
     cfg.require_contiguous = false;
     cfg.apply_calibration = true;
@@ -151,11 +161,9 @@ xxrf::core::Result<xxrf::aoa::Processor> make_processor(const Options& opt) {
     return xxrf::aoa::Processor::create(cfg, cal);
 }
 
-std::string format_deg(double v) {
-    return std::format("{:+.3f}", v);
-}
+std::string format_deg(double v) { return std::format("{:+.3f}", v); }
 
-} 
+} // namespace
 
 int main(int argc, char** argv) {
     Options opt;
@@ -246,6 +254,34 @@ int main(int argc, char** argv) {
         if (arg == "--min-coherence") {
             if (!parse_double(need_value("--min-coherence"), opt.min_coherence)) {
                 std::cerr << "Invalid --min-coherence\n";
+                return 2;
+            }
+            continue;
+        }
+        if (arg == "--signal-threshold-dbfs") {
+            if (!parse_double(need_value("--signal-threshold-dbfs"), opt.signal_threshold_dbfs)) {
+                std::cerr << "Invalid --signal-threshold-dbfs\n";
+                return 2;
+            }
+            continue;
+        }
+        if (arg == "--min-active-fraction") {
+            if (!parse_double(need_value("--min-active-fraction"), opt.min_active_fraction)) {
+                std::cerr << "Invalid --min-active-fraction\n";
+                return 2;
+            }
+            continue;
+        }
+        if (arg == "--phase-subwindows") {
+            if (!parse_int(need_value("--phase-subwindows"), opt.phase_stability_subwindows)) {
+                std::cerr << "Invalid --phase-subwindows\n";
+                return 2;
+            }
+            continue;
+        }
+        if (arg == "--max-phase-std-deg") {
+            if (!parse_double(need_value("--max-phase-std-deg"), opt.max_phase_std_deg)) {
+                std::cerr << "Invalid --max-phase-std-deg\n";
                 return 2;
             }
             continue;
@@ -356,6 +392,9 @@ int main(int argc, char** argv) {
     auto streamr = xxrf::aoa::rt::Stream::start(
         did_out, did_in, std::move(proc),
         [&](const xxrf::aoa::Estimate& est) {
+            if (!est.quality.ok) {
+                return;
+            }
             const double theta_deg = est.theta_rad * (180.0 / std::numbers::pi);
             const double coh = est.quality.coherence;
             const double p_dbfs = signal_power_to_dbfs(est.quality.mean_p0, est.quality.mean_p1);

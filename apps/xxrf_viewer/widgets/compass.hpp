@@ -2,9 +2,9 @@
 
 #include <cfloat>
 #include <cmath>
-#include <numbers>
 #include <cstdio>
 #include <imgui.h>
+#include <numbers>
 
 namespace xxrf_viewer {
 
@@ -18,11 +18,9 @@ inline void DrawThetaCompass(ImDrawList* dl, ImVec2 center, float radius, float 
         dl->AddCircleFilled(center, radius - 2.0f, IM_COL32(255, 160, 160, 46), 64);
     }
 
-    
     const ImU32 col_circle = IM_COL32(180, 180, 180, 255);
     dl->AddCircle(center, radius, col_circle, 64, 2.0f);
 
-    
     ImFont* font = ImGui::GetFont();
     const float font_size = ImGui::GetFontSize() * 0.72f;
     const float tick_minor = radius * 0.045f;
@@ -58,15 +56,12 @@ inline void DrawThetaCompass(ImDrawList* dl, ImVec2 center, float radius, float 
         dl->AddText(font, font_size, label_pos, label_col, label);
     }
 
-    
     dl->AddLine(center, ImVec2(center.x, center.y - radius), IM_COL32(180, 180, 180, 255), 1.0f);
 
-    
     dl->AddLine(center, ImVec2(center.x + radius, center.y), IM_COL32(120, 120, 120, 255), 1.0f);
     dl->AddLine(center, ImVec2(center.x - radius, center.y), IM_COL32(120, 120, 120, 255), 1.0f);
     dl->AddLine(center, ImVec2(center.x, center.y + radius), IM_COL32(120, 120, 120, 255), 1.0f);
 
-    
     if (!has_fix) {
         const char* label = (inactive_label != nullptr && inactive_label[0] != '\0') ? inactive_label : "НЕТ ОЦЕНКИ";
         const ImVec2 text_size = ImGui::CalcTextSize(label);
@@ -75,13 +70,9 @@ inline void DrawThetaCompass(ImDrawList* dl, ImVec2 center, float radius, float 
         return;
     }
 
-    
     float a = (coherence < 0.0f) ? 0.0f : (coherence > 1.0f ? 1.0f : coherence);
     a = alpha_min + (1.0f - alpha_min) * a;
 
-    
-    
-    
     const float dx = std::sin(theta_rad);
     const float dy = -std::cos(theta_rad);
 
@@ -91,9 +82,8 @@ inline void DrawThetaCompass(ImDrawList* dl, ImVec2 center, float radius, float 
     const ImU32 col_arrow = IM_COL32(80, 200, 255, int(255.0f * a));
     dl->AddLine(center, tip, col_arrow, 3.0f);
 
-    
     const float head = radius * 0.12f;
-    
+
     const float px = -dy;
     const float py = dx;
 
@@ -115,8 +105,10 @@ inline void DrawThetaCompass(ImDrawList* dl, ImVec2 center, float radius, float 
     label_center.x += px * (text_size.x * 0.18f);
     label_center.y += py * (text_size.y * 0.18f);
 
-    const ImVec2 label_min(label_center.x - (text_size.x * 0.5f) - pad_x, label_center.y - (text_size.y * 0.5f) - pad_y);
-    const ImVec2 label_max(label_center.x + (text_size.x * 0.5f) + pad_x, label_center.y + (text_size.y * 0.5f) + pad_y);
+    const ImVec2 label_min(label_center.x - (text_size.x * 0.5f) - pad_x,
+                           label_center.y - (text_size.y * 0.5f) - pad_y);
+    const ImVec2 label_max(label_center.x + (text_size.x * 0.5f) + pad_x,
+                           label_center.y + (text_size.y * 0.5f) + pad_y);
 
     const ImU32 col_label_bg = IM_COL32(8, 14, 20, 220);
     const ImU32 col_label_border = IM_COL32(80, 200, 255, 235);
@@ -131,4 +123,4 @@ inline void DrawThetaCompass(ImDrawList* dl, ImVec2 center, float radius, float 
                 theta_buf);
 }
 
-} 
+} // namespace xxrf_viewer

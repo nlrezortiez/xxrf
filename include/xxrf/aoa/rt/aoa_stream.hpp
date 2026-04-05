@@ -14,8 +14,6 @@ using ResultHandler = std::function<void(const xxrf::aoa::Estimate&)>;
 struct StreamOptions final {
     xxrf::sync::DualRxOptions dual{};
 
-    
-    
     bool require_zero_skew = false;
     bool drop_on_stop = true;
 };
@@ -50,4 +48,4 @@ private:
     Impl* impl_{nullptr};
 };
 
-} 
+} // namespace xxrf::aoa::rt

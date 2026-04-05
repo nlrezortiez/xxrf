@@ -32,8 +32,7 @@ using RxHandler = std::function<void(const RxBlock&)>;
 
 class RxStream final {
 public:
-    static xxrf::core::Result<RxStream> start(xxrf::core::Device& dev, RxHandler handler,
-                                              RxStreamOptions opt = {});
+    static xxrf::core::Result<RxStream> start(xxrf::core::Device& dev, RxHandler handler, RxStreamOptions opt = {});
 
     RxStream() = delete;
     RxStream(const RxStream&) = delete;
@@ -54,4 +53,4 @@ private:
     Impl* impl_{nullptr};
 };
 
-} 
+} // namespace xxrf::stream

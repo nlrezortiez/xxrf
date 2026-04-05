@@ -4,10 +4,8 @@
 
 namespace xxrf::aoa {
 
-
-
 struct Calibration final {
-    std::complex<float> ch1_gain = {1.0f, 0.0f}; 
+    std::complex<float> ch1_gain = {1.0f, 0.0f};
 };
 
-} 
+} // namespace xxrf::aoa

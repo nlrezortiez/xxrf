@@ -6,11 +6,9 @@
 
 namespace {
 
-bool approx(double a, double b, double eps = 1e-9) {
-    return std::abs(a - b) <= eps;
-}
+bool approx(double a, double b, double eps = 1e-9) { return std::abs(a - b) <= eps; }
 
-}
+} // namespace
 
 int main() {
     using namespace xxrf::aoa;

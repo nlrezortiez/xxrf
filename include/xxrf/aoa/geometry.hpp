@@ -22,8 +22,8 @@ inline constexpr double kSpeedOfLight = 299'792'458.0;
 }
 
 struct PhaseToAngleResult final {
-    double theta_rad = 0.0;   
-    double azimuth_rad = 0.0; 
+    double theta_rad = 0.0;
+    double azimuth_rad = 0.0;
     bool ok = false;
 };
 
@@ -35,17 +35,16 @@ struct PhaseToAngleResult final {
     const double lambda = wavelength_m(center_freq_hz);
 
     if (!(d > 0.0) || !(lambda > 0.0)) {
-        return out; 
+        return out;
     }
 
-    
     const double denom = (2.0 * std::numbers::pi * d);
     const double sin_theta = (phase_rad * lambda) / denom;
 
     double s = sin_theta;
     if (std::abs(s) > 1.0) {
         if (!clamp_sin) {
-            return out; 
+            return out;
         }
         s = std::copysign(1.0, s);
     }
@@ -56,4 +55,4 @@ struct PhaseToAngleResult final {
     return out;
 }
 
-} 
+} // namespace xxrf::aoa

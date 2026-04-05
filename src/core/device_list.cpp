@@ -1,5 +1,6 @@
-#include "xxrf/core/context.hpp"
 #include "xxrf/core/device_list.hpp"
+
+#include "xxrf/core/context.hpp"
 
 #include <utility>
 
@@ -62,4 +63,4 @@ std::vector<DeviceInfo> DeviceList::devices() const {
     return out;
 }
 
-} 
+} // namespace xxrf::core

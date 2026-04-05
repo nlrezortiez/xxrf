@@ -189,4 +189,4 @@ Result<std::uint8_t> Device::clkin_detected() {
     return status;
 }
 
-} 
+} // namespace xxrf::core

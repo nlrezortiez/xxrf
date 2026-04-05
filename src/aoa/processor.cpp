@@ -1,40 +1,41 @@
-#include "xxrf/aoa/geometry.hpp"
 #include "xxrf/aoa/processor.hpp"
 
+#include "xxrf/aoa/geometry.hpp"
+
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <complex>
 #include <cstddef>
 #include <cstdint>
-#include <atomic>
 #include <format>
+#include <limits>
 #include <memory>
 #include <new>
 #include <vector>
 
 namespace xxrf::aoa {
 
-static inline float i8_to_f(std::int8_t v) noexcept {
-    
-    return static_cast<float>(v) * (1.0F / 128.0F);
-}
+static inline float i8_to_f(std::int8_t v) noexcept { return static_cast<float>(v) * (1.0F / 128.0F); }
 
 struct Processor::Impl final {
     Config cfg{};
     Calibration cal{};
 
-    
     std::vector<std::complex<double>> cross_ring;
     std::vector<double> p0_ring;
     std::vector<double> p1_ring;
+    std::vector<std::uint8_t> active_ring;
 
     std::complex<double> cross_sum{0.0, 0.0};
     double p0_sum = 0.0;
     double p1_sum = 0.0;
+    std::size_t active_sum = 0;
+    double active_power_threshold_linear = 0.0;
 
     std::size_t ring_pos = 0;
-    std::size_t filled = 0;     
-    std::size_t since_emit = 0; 
+    std::size_t filled = 0;
+    std::size_t since_emit = 0;
 
     std::uint64_t expected_next_first = std::numeric_limits<std::uint64_t>::max();
 
@@ -44,11 +45,14 @@ struct Processor::Impl final {
     std::atomic<std::uint64_t> discontinuities{0};
     std::atomic<std::uint64_t> invalid_geometry{0};
     std::atomic<std::uint64_t> below_quality{0};
+    std::atomic<std::uint64_t> below_activity{0};
+    std::atomic<std::uint64_t> unstable_phase{0};
 
     void clear_accumulators() noexcept {
         cross_sum = {0.0, 0.0};
         p0_sum = 0.0;
         p1_sum = 0.0;
+        active_sum = 0;
         ring_pos = 0;
         filled = 0;
         since_emit = 0;
@@ -56,41 +60,107 @@ struct Processor::Impl final {
         std::fill(cross_ring.begin(), cross_ring.end(), std::complex<double>{0.0, 0.0});
         std::fill(p0_ring.begin(), p0_ring.end(), 0.0);
         std::fill(p1_ring.begin(), p1_ring.end(), 0.0);
+        std::fill(active_ring.begin(), active_ring.end(), std::uint8_t{0});
+    }
+
+    [[nodiscard]] std::size_t ordered_slot(std::size_t logical_index) const noexcept {
+        const std::size_t start = (filled < cfg.win.window_samples) ? 0 : ring_pos;
+        return (start + logical_index) % cfg.win.window_samples;
+    }
+
+    [[nodiscard]] double compute_phase_std_deg() const noexcept {
+        if (cfg.phase_stability_subwindows <= 1 || filled < cfg.win.window_samples) {
+            return 0.0;
+        }
+
+        const std::size_t parts = std::min(cfg.phase_stability_subwindows, cfg.win.window_samples);
+        if (parts <= 1) {
+            return 0.0;
+        }
+
+        double sum_unit_re = 0.0;
+        double sum_unit_im = 0.0;
+        std::size_t valid_parts = 0;
+
+        for (std::size_t part = 0; part < parts; ++part) {
+            const std::size_t begin = (cfg.win.window_samples * part) / parts;
+            const std::size_t end = (cfg.win.window_samples * (part + 1)) / parts;
+
+            std::complex<double> part_cross{0.0, 0.0};
+            std::size_t part_active = 0;
+
+            for (std::size_t i = begin; i < end; ++i) {
+                const std::size_t slot = ordered_slot(i);
+                if (active_ring[slot] == 0) {
+                    continue;
+                }
+                part_cross += cross_ring[slot];
+                ++part_active;
+            }
+
+            if (part_active == 0 || std::abs(part_cross) <= std::numeric_limits<double>::epsilon()) {
+                continue;
+            }
+
+            const double phase = std::atan2(part_cross.imag(), part_cross.real());
+            sum_unit_re += std::cos(phase);
+            sum_unit_im += std::sin(phase);
+            ++valid_parts;
+        }
+
+        if (valid_parts < 2) {
+            return 180.0;
+        }
+
+        const double r = std::clamp(std::hypot(sum_unit_re, sum_unit_im) / static_cast<double>(valid_parts), 0.0, 1.0);
+        if (r <= std::numeric_limits<double>::epsilon()) {
+            return 180.0;
+        }
+
+        const double std_rad = std::sqrt(std::max(0.0, -2.0 * std::log(r)));
+        return std_rad * (180.0 / std::numbers::pi);
     }
 
     void add_sample(std::complex<double> cross, double p0, double p1, std::uint64_t sample_index,
                     FunctionRef<void(const Estimate&)> emit) {
-        
+        const std::uint8_t active =
+            (std::min(p0, p1) >= active_power_threshold_linear) ? std::uint8_t{1} : std::uint8_t{0};
+
         if (filled < cfg.win.window_samples) {
             cross_ring[ring_pos] = cross;
             p0_ring[ring_pos] = p0;
             p1_ring[ring_pos] = p1;
+            active_ring[ring_pos] = active;
 
             cross_sum += cross;
             p0_sum += p0;
             p1_sum += p1;
+            active_sum += active;
 
             ++filled;
             ring_pos = (ring_pos + 1) % cfg.win.window_samples;
         } else {
-            
+
             cross_sum -= cross_ring[ring_pos];
             p0_sum -= p0_ring[ring_pos];
             p1_sum -= p1_ring[ring_pos];
+            active_sum -= active_ring[ring_pos];
 
             cross_ring[ring_pos] = cross;
             p0_ring[ring_pos] = p0;
             p1_ring[ring_pos] = p1;
+            active_ring[ring_pos] = active;
 
             cross_sum += cross;
             p0_sum += p0;
             p1_sum += p1;
+            active_sum += active;
 
             ring_pos = (ring_pos + 1) % cfg.win.window_samples;
         }
 
         if (filled < cfg.win.window_samples) {
-            return; 
+            return;
         }
 
         ++since_emit;
@@ -99,11 +169,9 @@ struct Processor::Impl final {
         }
         since_emit = 0;
 
-        
         Estimate est{};
         est.raw_phase_rad = std::atan2(cross_sum.imag(), cross_sum.real());
 
-        
         double coh = 0.0;
         if (p0_sum > 0.0 && p1_sum > 0.0) {
             const double num = std::abs(cross_sum);
@@ -116,29 +184,38 @@ struct Processor::Impl final {
         est.quality.coherence = coh;
         est.quality.mean_p0 = p0_sum / static_cast<double>(cfg.win.window_samples);
         est.quality.mean_p1 = p1_sum / static_cast<double>(cfg.win.window_samples);
+        est.quality.active_fraction = static_cast<double>(active_sum) / static_cast<double>(cfg.win.window_samples);
+        est.quality.phase_std_deg = compute_phase_std_deg();
 
         auto ang = phase_to_angle(est.raw_phase_rad, cfg.geom, cfg.center_freq_hz, cfg.clamp_sin);
         if (!ang.ok) {
             invalid_geometry.fetch_add(1, std::memory_order_relaxed);
             est.quality.ok = false;
-            
+
             return;
         }
 
         est.theta_rad = ang.theta_rad;
         est.azimuth_rad = ang.azimuth_rad;
 
-        const bool ok = (coh >= cfg.min_coherence);
+        const bool coherence_ok = (coh >= cfg.min_coherence);
+        const bool activity_ok = (est.quality.active_fraction >= cfg.min_active_fraction);
+        const bool phase_ok = (est.quality.phase_std_deg <= cfg.max_phase_std_deg);
+        const bool ok = coherence_ok && activity_ok && phase_ok;
         est.quality.ok = ok;
 
-        
-        
         const std::uint64_t half_span =
             static_cast<std::uint64_t>((cfg.win.window_samples / 2) * cfg.win.sample_stride);
         est.sample_index = (sample_index >= half_span) ? (sample_index - half_span) : sample_index;
 
         if (!ok) {
             below_quality.fetch_add(1, std::memory_order_relaxed);
+            if (!activity_ok) {
+                below_activity.fetch_add(1, std::memory_order_relaxed);
+            }
+            if (!phase_ok) {
+                unstable_phase.fetch_add(1, std::memory_order_relaxed);
+            }
             if (!cfg.emit_below_quality) {
                 return;
             }
@@ -150,7 +227,7 @@ struct Processor::Impl final {
 };
 
 xxrf::core::Result<Processor> Processor::create(Config cfg, Calibration cal) {
-    
+
     if (cfg.method != Method::PhaseInterferometry) {
         return std::unexpected(
             xxrf::core::Error{.code = -1, .message = "AoA Processor: only PhaseInterferometry is implemented"});
@@ -168,9 +245,8 @@ xxrf::core::Result<Processor> Processor::create(Config cfg, Calibration cal) {
     if (!(cfg.geom.baseline_m <= max_baseline_m)) {
         return std::unexpected(xxrf::core::Error{
             .code = -1,
-            .message =
-                std::format("AoA Processor: geom.baseline_m must be <= lambda/2 ({:.6f} m at {} Hz)",
-                            max_baseline_m, cfg.center_freq_hz),
+            .message = std::format("AoA Processor: geom.baseline_m must be <= lambda/2 ({:.6f} m at {} Hz)",
+                                   max_baseline_m, cfg.center_freq_hz),
         });
     }
     if (cfg.win.window_samples == 0 || cfg.win.hop_samples == 0) {
@@ -188,14 +264,32 @@ xxrf::core::Result<Processor> Processor::create(Config cfg, Calibration cal) {
         return std::unexpected(
             xxrf::core::Error{.code = -1, .message = "AoA Processor: min_coherence must be in [0,1]"});
     }
+    if (cfg.signal_threshold_dbfs > 0.0) {
+        return std::unexpected(
+            xxrf::core::Error{.code = -1, .message = "AoA Processor: signal_threshold_dbfs must be <= 0"});
+    }
+    if (cfg.min_active_fraction < 0.0 || cfg.min_active_fraction > 1.0) {
+        return std::unexpected(
+            xxrf::core::Error{.code = -1, .message = "AoA Processor: min_active_fraction must be in [0,1]"});
+    }
+    if (cfg.phase_stability_subwindows == 0) {
+        return std::unexpected(
+            xxrf::core::Error{.code = -1, .message = "AoA Processor: phase_stability_subwindows must be >= 1"});
+    }
+    if (cfg.max_phase_std_deg < 0.0) {
+        return std::unexpected(
+            xxrf::core::Error{.code = -1, .message = "AoA Processor: max_phase_std_deg must be >= 0"});
+    }
 
     auto impl = std::make_unique<Impl>();
     impl->cfg = cfg;
     impl->cal = cal;
+    impl->active_power_threshold_linear = std::pow(10.0, cfg.signal_threshold_dbfs / 10.0);
 
     impl->cross_ring.resize(cfg.win.window_samples);
     impl->p0_ring.resize(cfg.win.window_samples);
     impl->p1_ring.resize(cfg.win.window_samples);
+    impl->active_ring.resize(cfg.win.window_samples);
     impl->clear_accumulators();
 
     return Processor{impl.release()};
@@ -258,6 +352,8 @@ Stats Processor::stats() const noexcept {
     st.discontinuities = impl_->discontinuities.load(std::memory_order_relaxed);
     st.invalid_geometry = impl_->invalid_geometry.load(std::memory_order_relaxed);
     st.below_quality = impl_->below_quality.load(std::memory_order_relaxed);
+    st.below_activity = impl_->below_activity.load(std::memory_order_relaxed);
+    st.unstable_phase = impl_->unstable_phase.load(std::memory_order_relaxed);
     return st;
 }
 
@@ -268,7 +364,6 @@ void Processor::push(const InputFrameView& frame, FunctionRef<void(const Estimat
 
     impl_->frames_in.fetch_add(1, std::memory_order_relaxed);
 
-    
     const std::size_t n0 = (frame.iq0_i8q8.size() / 2);
     const std::size_t n1 = (frame.iq1_i8q8.size() / 2);
     const std::size_t n = std::min(n0, n1);
@@ -277,7 +372,6 @@ void Processor::push(const InputFrameView& frame, FunctionRef<void(const Estimat
         return;
     }
 
-    
     if (impl_->cfg.require_contiguous) {
         if (impl_->expected_next_first != std::numeric_limits<std::uint64_t>::max()) {
             if (frame.first_sample_index != impl_->expected_next_first) {
@@ -285,7 +379,7 @@ void Processor::push(const InputFrameView& frame, FunctionRef<void(const Estimat
                 impl_->clear_accumulators();
             }
         }
-        
+
         impl_->expected_next_first = frame.first_sample_index + static_cast<std::uint64_t>(n);
     } else {
         impl_->expected_next_first = std::numeric_limits<std::uint64_t>::max();
@@ -293,8 +387,6 @@ void Processor::push(const InputFrameView& frame, FunctionRef<void(const Estimat
 
     const std::size_t stride = impl_->cfg.win.sample_stride;
 
-    
-    
     const std::complex<float> g = impl_->cfg.apply_calibration ? impl_->cal.ch1_gain : std::complex<float>{1.0F, 0.0F};
 
     for (std::size_t i = 0; i < n; i += stride) {
@@ -325,4 +417,4 @@ void Processor::push(const InputFrameView& frame, FunctionRef<void(const Estimat
     }
 }
 
-} 
+} // namespace xxrf::aoa

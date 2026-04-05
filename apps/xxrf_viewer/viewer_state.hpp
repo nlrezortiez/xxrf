@@ -3,9 +3,9 @@
 #include "telemetry.hpp"
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cmath>
 #include <deque>
 #include <limits>
 #include <numbers>
@@ -113,6 +113,24 @@ struct CalibrationAccumulator final {
     }
 };
 
+enum class AllowedAoASide : std::uint8_t {
+    Both = 0,
+    Positive = 1,
+    Negative = 2,
+};
+
+inline bool is_theta_side_allowed(float theta_rad, AllowedAoASide side) noexcept {
+    switch (side) {
+    case AllowedAoASide::Both:
+        return true;
+    case AllowedAoASide::Positive:
+        return theta_rad >= 0.0f;
+    case AllowedAoASide::Negative:
+        return theta_rad <= 0.0f;
+    }
+    return true;
+}
+
 struct ViewerState final {
     static constexpr std::size_t history_size = 180;
     static constexpr std::uint64_t stale_fix_timeout_ns = 750'000'000ULL;
@@ -143,6 +161,10 @@ struct ViewerState final {
     int sample_stride = 32;
 
     double min_coherence = 0.20;
+    double min_active_fraction = 0.15;
+    int phase_stability_subwindows = 4;
+    double max_phase_std_deg = 20.0;
+    AllowedAoASide allowed_side = AllowedAoASide::Both;
     double smooth_tau_s = 0.20;
     float signal_threshold_dbfs = -55.0f;
     float signal_threshold_hysteresis_db = 2.0f;
@@ -182,8 +204,7 @@ struct ViewerState final {
 };
 
 template <std::size_t N>
-inline void push_history_sample(std::array<float, N>& values, std::size_t& head, std::size_t& count,
-                                float sample) {
+inline void push_history_sample(std::array<float, N>& values, std::size_t& head, std::size_t& count, float sample) {
     values[head] = sample;
     head = (head + 1U) % N;
     if (count < N) {

@@ -57,4 +57,4 @@ private:
     friend class xxrf::stream::RxStream;
 };
 
-} 
+} // namespace xxrf::core

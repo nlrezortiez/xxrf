@@ -7,4 +7,3 @@
 #include "xxrf/core/error.hpp"
 #include "xxrf/stream/rx_stream.hpp"
 #include "xxrf/sync/dual_rx.hpp"
-

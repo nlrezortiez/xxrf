@@ -10,10 +10,8 @@ namespace xxrf::core {
 
 struct Error final {
 
-     
     int code{};
 
-     
     std::string message{};
 };
 
@@ -31,4 +29,4 @@ inline Error make_error(int code, std::string_view where) {
 
 inline Status ok() { return {}; }
 
-} 
+} // namespace xxrf::core

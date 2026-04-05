@@ -89,6 +89,20 @@ int main() {
                 continue;
             }
 
+            if (!s.quality_ok) {
+                vs.has_valid_fix = false;
+                vs.last_valid = {};
+                vs.smooth_init = false;
+                continue;
+            }
+
+            if (!is_theta_side_allowed(s.theta_rad, vs.allowed_side)) {
+                vs.has_valid_fix = false;
+                vs.last_valid = {};
+                vs.smooth_init = false;
+                continue;
+            }
+
             if (!gate_was_open) {
                 vs.smooth_init = false;
             }

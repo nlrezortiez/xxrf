@@ -7,7 +7,6 @@
 
 namespace xxrf::aoa {
 
-
 class Processor final {
 public:
     static xxrf::core::Result<Processor> create(Config cfg, Calibration cal = {});
@@ -29,8 +28,6 @@ public:
     Config config() const noexcept;
     Stats stats() const noexcept;
 
-    
-    
     void push(const InputFrameView& frame, FunctionRef<void(const Estimate&)> emit);
 
 private:
@@ -39,4 +36,4 @@ private:
     Impl* impl_{nullptr};
 };
 
-} 
+} // namespace xxrf::aoa

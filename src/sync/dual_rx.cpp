@@ -16,7 +16,6 @@ namespace xxrf::sync {
 static inline void atomic_max(std::atomic<std::uint64_t>& dst, std::uint64_t v) noexcept {
     std::uint64_t cur = dst.load(std::memory_order_relaxed);
     while (v > cur && !dst.compare_exchange_weak(cur, v, std::memory_order_relaxed)) {
-        
     }
 }
 
@@ -26,28 +25,24 @@ static inline xxrf::core::Error make_local_error(std::string msg) {
 
 struct BlockCopy final {
     std::uint64_t first_sample = 0;
-    std::vector<std::int8_t> iq; 
+    std::vector<std::int8_t> iq;
 };
 
 struct DualRx::Impl final {
-    
+
     xxrf::core::Context ctx_guard;
 
     DualRxOptions opt{};
 
-    
-    xxrf::core::Device dev_out; 
-    xxrf::core::Device dev_in;  
+    xxrf::core::Device dev_out;
+    xxrf::core::Device dev_in;
 
-    
     std::optional<xxrf::stream::RxStream> rx_out;
     std::optional<xxrf::stream::RxStream> rx_in;
 
-    
     std::thread coordinator;
     DualRxHandler handler;
 
-    
     std::mutex m;
     std::condition_variable cv;
 
@@ -59,7 +54,6 @@ struct DualRx::Impl final {
     bool out_done = false;
     bool in_done = false;
 
-    
     std::atomic<std::uint64_t> pairs_emitted{0};
     std::atomic<std::uint64_t> drops_pairing_out{0};
     std::atomic<std::uint64_t> drops_pairing_in{0};
@@ -68,7 +62,6 @@ struct DualRx::Impl final {
     std::atomic<std::uint64_t> staging_max_depth_out{0};
     std::atomic<std::uint64_t> staging_max_depth_in{0};
 
-    
     mutable std::mutex fatal_m;
     std::optional<xxrf::core::Error> fatal;
 
@@ -111,8 +104,7 @@ struct DualRx::Impl final {
     }
 
     void push_block(bool is_out, const xxrf::stream::RxBlock& blk) noexcept {
-        
-        
+
         if (stop_requested.load(std::memory_order_relaxed) && drop_queued_on_stop.load(std::memory_order_relaxed)) {
             return;
         }
@@ -140,7 +132,7 @@ struct DualRx::Impl final {
             const std::size_t cap = opt.staging_queue_blocks;
 
             if (q.size() >= cap) {
-                
+
                 q.pop_front();
                 if (is_out) {
                     drops_pairing_out.fetch_add(1, std::memory_order_relaxed);
@@ -177,8 +169,7 @@ struct DualRx::Impl final {
     }
 
     void coordinator_loop() noexcept {
-        
-        
+
         for (;;) {
             BlockCopy a;
             BlockCopy b;
@@ -198,7 +189,6 @@ struct DualRx::Impl final {
                     return !q_out.empty() && !q_in.empty();
                 });
 
-                
                 if (stop_requested.load(std::memory_order_relaxed) && out_done && in_done && q_out.empty() &&
                     q_in.empty()) {
                     break;
@@ -214,7 +204,7 @@ struct DualRx::Impl final {
                 }
 
                 if (q_out.empty() || q_in.empty()) {
-                    
+
                     continue;
                 }
 
@@ -224,12 +214,10 @@ struct DualRx::Impl final {
                     b = std::move(q_in.front());
                     q_in.pop_front();
 
-                    
                     first_common = std::max(a.first_sample, b.first_sample);
                     skew_abs = abs_diff_u64(a.first_sample, b.first_sample);
                     atomic_max(max_abs_skew_samples, skew_abs);
 
-                    
                     if (a.first_sample < first_common) {
                         skip_a_bytes = static_cast<std::size_t>((first_common - a.first_sample) * 2);
                     }
@@ -242,10 +230,10 @@ struct DualRx::Impl final {
                     use_bytes = std::min(a_av, b_av);
                     use_bytes &= ~std::size_t{1};
 
-                } else { 
+                } else {
                     for (;;) {
                         if (q_out.empty() || q_in.empty()) {
-                            break; 
+                            break;
                         }
 
                         const auto& ao = q_out.front();
@@ -258,7 +246,7 @@ struct DualRx::Impl final {
                         atomic_max(max_abs_skew_samples, skew);
 
                         if (skew <= opt.max_skew_samples) {
-                            
+
                             a = std::move(q_out.front());
                             q_out.pop_front();
                             b = std::move(q_in.front());
@@ -281,7 +269,6 @@ struct DualRx::Impl final {
                             break;
                         }
 
-                        
                         if (out_first < in_first) {
                             q_out.pop_front();
                             drops_pairing_out.fetch_add(1, std::memory_order_relaxed);
@@ -289,23 +276,20 @@ struct DualRx::Impl final {
                             q_in.pop_front();
                             drops_pairing_in.fetch_add(1, std::memory_order_relaxed);
                         }
-
-                        
                     }
-                } 
-            } 
+                }
+            }
 
             if (stop_requested.load(std::memory_order_relaxed) && (a.iq.empty() || b.iq.empty())) {
-                
+
                 continue;
             }
 
             if (a.iq.empty() || b.iq.empty() || use_bytes == 0) {
-                
+
                 continue;
             }
 
-            
             try {
                 DualRxBlockView view;
                 view.first_sample_index = first_common;
@@ -362,7 +346,7 @@ static xxrf::core::Status apply_common_settings(xxrf::core::Device& d, const Dua
 static xxrf::core::Status configure_sync(xxrf::core::Device& out_dev, xxrf::core::Device& in_dev,
                                          const DualRxSyncOptions& so) noexcept {
     if (!so.enable_hardware_trigger) {
-        
+
         if (auto r = out_dev.set_hw_sync_mode(false); !r) {
             return std::unexpected(r.error());
         }
@@ -372,17 +356,14 @@ static xxrf::core::Status configure_sync(xxrf::core::Device& out_dev, xxrf::core
         return xxrf::core::ok();
     }
 
-    
     if (auto r = out_dev.set_hw_sync_mode(false); !r) {
         return std::unexpected(r.error());
     }
 
-    
     if (auto r = in_dev.set_hw_sync_mode(true); !r) {
         return std::unexpected(r.error());
     }
 
-    
     if (so.enable_clkout_on_trigger_out) {
         if (auto r = out_dev.set_clkout_enable(true); !r) {
             return std::unexpected(r.error());
@@ -424,14 +405,12 @@ xxrf::core::Result<DualRx> DualRx::start(const DualRxDeviceId& trigger_out, cons
         return std::unexpected(d_in.error());
     }
 
-    
     return DualRx::start(std::move(*d_out), std::move(*d_in), std::move(handler), std::move(opt));
 }
 
 xxrf::core::Result<DualRx> DualRx::start(xxrf::core::Device trigger_out_dev, xxrf::core::Device trigger_in_dev,
                                          DualRxHandler handler, DualRxOptions opt) {
 
-    
     std::unique_ptr<Impl> impl;
     {
         auto guard = xxrf::core::Context::create();
@@ -443,7 +422,6 @@ xxrf::core::Result<DualRx> DualRx::start(xxrf::core::Device trigger_out_dev, xxr
                                       std::move(handler));
     }
 
-    
     if (impl->opt.settings.apply_common_settings) {
         if (auto r = apply_common_settings(impl->dev_out, impl->opt.settings); !r) {
             return std::unexpected(r.error());
@@ -453,16 +431,12 @@ xxrf::core::Result<DualRx> DualRx::start(xxrf::core::Device trigger_out_dev, xxr
         }
     }
 
-    
     if (auto r = configure_sync(impl->dev_out, impl->dev_in, impl->opt.sync); !r) {
         return std::unexpected(r.error());
     }
 
-    
     impl->coordinator = std::thread([p = impl.get()] { p->coordinator_loop(); });
 
-    
-    
     {
         auto rx_in_res = xxrf::stream::RxStream::start(
             impl->dev_in, [p = impl.get()](const xxrf::stream::RxBlock& blk) { p->push_block(false, blk); },
@@ -492,7 +466,7 @@ xxrf::core::Result<DualRx> DualRx::start(xxrf::core::Device trigger_out_dev, xxr
             impl->dev_out, [p = impl.get()](const xxrf::stream::RxBlock& blk) { p->push_block(true, blk); },
             impl->opt.stream);
         if (!rx_out_res) {
-            
+
             impl->request_stop(true);
 
             (void)impl->rx_in->stop();
@@ -615,4 +589,4 @@ xxrf::core::Device& DualRx::device_trigger_out() noexcept { return impl_->dev_ou
 
 xxrf::core::Device& DualRx::device_trigger_in() noexcept { return impl_->dev_in; }
 
-} 
+} // namespace xxrf::sync

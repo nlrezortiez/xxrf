@@ -11,10 +11,9 @@
 namespace xxrf::core {
 
 struct DeviceInfo final {
-     
+
     std::string serial;
 
-     
     int usb_bus_sharing_count{0};
 };
 
@@ -40,4 +39,4 @@ private:
     hackrf_device_list_t* list_{nullptr};
 };
 
-} 
+} // namespace xxrf::core

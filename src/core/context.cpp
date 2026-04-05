@@ -57,4 +57,4 @@ Context::~Context() {
     }
 }
 
-} 
+} // namespace xxrf::core

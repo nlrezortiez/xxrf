@@ -7,8 +7,8 @@
 #include <cstring>
 #include <exception>
 #include <hackrf.h>
-#include <mutex>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <optional>
 #include <semaphore>
@@ -34,16 +34,13 @@ struct RxStream::Impl final {
 
     RxStreamOptions opt{};
 
-    
     std::vector<std::int8_t> storage;
-    std::vector<std::uint32_t> lens;         
-    std::vector<std::uint64_t> first_sample; 
+    std::vector<std::uint32_t> lens;
+    std::vector<std::uint64_t> first_sample;
 
     std::atomic<std::uint64_t> write_idx{0};
     std::atomic<std::uint64_t> read_idx{0};
 
-    
-    
     std::atomic<std::uint64_t> items{0};
 
     std::atomic<bool> stop_requested{false};
@@ -55,10 +52,8 @@ struct RxStream::Impl final {
     std::atomic<std::uint64_t> blocks_truncated{0};
     std::atomic<std::uint64_t> ring_max_depth{0};
 
-    
     std::atomic<std::uint64_t> sample_counter{0};
 
-    
     std::binary_semaphore sem{0};
 
     std::thread consumer;
@@ -84,14 +79,14 @@ struct RxStream::Impl final {
     }
 
     static int rx_callback(hackrf_transfer* transfer) noexcept {
-        
+
         auto* self = static_cast<Impl*>(transfer->rx_ctx);
         if (self == nullptr) {
             return 1;
         }
 
         if (self->stop_requested.load(std::memory_order_relaxed)) {
-            return 1; 
+            return 1;
         }
 
         const std::size_t cap = self->capacity();
@@ -99,7 +94,7 @@ struct RxStream::Impl final {
         const std::uint64_t r = self->read_idx.load(std::memory_order_acquire);
 
         if ((w - r) >= cap) {
-            
+
             self->blocks_dropped.fetch_add(1, std::memory_order_relaxed);
             return 0;
         }
@@ -114,7 +109,7 @@ struct RxStream::Impl final {
             truncated = true;
         }
 
-        bytes &= ~std::size_t{1}; 
+        bytes &= ~std::size_t{1};
 
         if (truncated) {
             self->blocks_truncated.fetch_add(1, std::memory_order_relaxed);
@@ -221,7 +216,7 @@ xxrf::core::Result<RxStream> RxStream::start(xxrf::core::Device& dev, RxHandler 
     const int rc = hackrf_start_rx(impl->dev->native_handle(), &Impl::rx_callback, impl.get());
     if (rc != HACKRF_SUCCESS) {
         impl->stop_requested.store(true, std::memory_order_relaxed);
-        impl->sem.release(); 
+        impl->sem.release();
         if (impl->consumer.joinable()) {
             impl->consumer.join();
         }
@@ -259,7 +254,7 @@ void RxStream::request_stop() noexcept {
         return;
     }
     impl_->stop_requested.store(true, std::memory_order_relaxed);
-    impl_->sem.release(); 
+    impl_->sem.release();
 }
 
 xxrf::core::Status RxStream::stop() {
@@ -269,19 +264,19 @@ xxrf::core::Status RxStream::stop() {
 
     if (impl_->consumer.joinable() && std::this_thread::get_id() == impl_->consumer.get_id()) {
         request_stop();
-        return std::unexpected(make_local_error("[RxStream::stop] must not be called from RxHandler; use request_stop()"));
+        return std::unexpected(
+            make_local_error("[RxStream::stop] must not be called from RxHandler; use request_stop()"));
     }
 
     const bool was_running = impl_->running.exchange(false, std::memory_order_relaxed);
 
     impl_->stop_requested.store(true, std::memory_order_relaxed);
 
-    
     impl_->sem.release();
 
     xxrf::core::Status st = xxrf::core::ok();
     if (was_running) {
-        
+
         st = impl_->dev->stop_rx();
     }
     impl_->sem.release();
@@ -313,4 +308,4 @@ RxStats RxStream::stats() const noexcept {
     return s;
 }
 
-} 
+} // namespace xxrf::stream

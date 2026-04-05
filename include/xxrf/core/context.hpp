@@ -7,10 +7,6 @@
 
 namespace xxrf::core {
 
- 
-
-
-
 class Context final {
 public:
     static Result<Context> create();
@@ -34,4 +30,4 @@ private:
     static inline std::atomic_uint ref_count_{0};
 };
 
-} 
+} // namespace xxrf::core

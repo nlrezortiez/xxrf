@@ -13,6 +13,9 @@ struct AoASample final {
     float theta_rad = 0.0f;
     float coherence = 0.0f;
     float signal_power_dbfs = -120.0f;
+    float active_fraction = 0.0f;
+    float phase_std_deg = 180.0f;
+    bool quality_ok = false;
 };
 
 template <std::size_t N>
@@ -64,4 +67,4 @@ private:
     alignas(64) std::atomic<std::uint64_t> drops_{0};
 };
 
-} 
+} // namespace xxrf_viewer

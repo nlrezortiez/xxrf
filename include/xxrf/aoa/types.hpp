@@ -10,7 +10,7 @@ namespace xxrf::aoa {
 
 enum class Method : std::uint8_t {
     PhaseInterferometry = 0,
-    
+
 };
 
 struct ArrayGeometry final {
@@ -36,6 +36,8 @@ struct Quality final {
     double coherence = 0.0;
     double mean_p0 = 0.0;
     double mean_p1 = 0.0;
+    double active_fraction = 0.0;
+    double phase_std_deg = 180.0;
 
     bool ok = false;
 };
@@ -58,6 +60,10 @@ struct Config final {
     Windowing win{};
 
     double min_coherence = 0.6;
+    double signal_threshold_dbfs = -90.0;
+    double min_active_fraction = 0.0;
+    std::size_t phase_stability_subwindows = 1;
+    double max_phase_std_deg = 180.0;
     bool clamp_sin = false;
     bool require_contiguous = true;
     bool apply_calibration = true;
@@ -95,6 +101,8 @@ struct Stats final {
     std::uint64_t discontinuities = 0;
     std::uint64_t invalid_geometry = 0;
     std::uint64_t below_quality = 0;
+    std::uint64_t below_activity = 0;
+    std::uint64_t unstable_phase = 0;
 };
 
-} 
+} // namespace xxrf::aoa

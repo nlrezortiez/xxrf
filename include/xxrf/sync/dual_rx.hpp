@@ -113,4 +113,4 @@ private:
     Impl* impl_{nullptr};
 };
 
-} 
+} // namespace xxrf::sync
